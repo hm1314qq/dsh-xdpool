@@ -282,4 +282,58 @@ describe('earnings ledger persistence', () => {
     // Yesterday's total must never be presented as today's.
     expect(scheduler.status().earningsToday).toEqual({})
   })
+
+  it('drops stale per-account entries even when the outer date is today', async () => {
+    // A settings rewrite can leave `ledger.date` at today while an entry still
+    // carries yesterday's stamp (seen in the field: date=11-13 outer, entry
+    // date=11-12, travelCredit=10). Trusting only the outer date showed stale
+    // rewards under today's label.
+    const { pool, client } = await harness(1)
+    const id = pool.list()[0]!.id
+    const stale = { credit: 0, energy: 0, claimed: 0, checkinCredit: 0, bonusCredit: 0, travelCredit: 10, compensationCredit: 0, date: '2026-09-22' }
+    const fresh = { ...stale, credit: 50, travelCredit: 0, date: '2026-09-23' }
+    const scheduler = new WorkBuddyScheduler(pool, client, {
+      enabled: true,
+      now: () => beijing(2026, 8, 23, 11, 0, 0),
+      logger: {},
+      loadEarnings: () => ({ date: '2026-09-23', accounts: { [id]: stale, other: fresh } }),
+    })
+    expect(scheduler.status().earningsToday[id]).toBeUndefined()
+    expect(scheduler.status().earningsToday.other?.credit).toBe(50)
+  })
+
+  it('applyEarningsLedger filters stale entries the same way', async () => {
+    const { pool, client } = await harness(1)
+    const id = pool.list()[0]!.id
+    const scheduler = new WorkBuddyScheduler(pool, client, {
+      enabled: true,
+      now: () => beijing(2026, 8, 23, 11, 0, 0),
+      logger: {},
+    })
+    // Simulate the host handing over a settings document after construction.
+    scheduler.applyEarningsLedger({
+      date: '2026-09-23',
+      accounts: {
+        [id]: { credit: 0, energy: 0, claimed: 0, checkinCredit: 0, bonusCredit: 0, travelCredit: 10, compensationCredit: 0, date: '2026-09-22' },
+        fresh: { credit: 30, energy: 0, claimed: 1, checkinCredit: 0, bonusCredit: 0, travelCredit: 0, compensationCredit: 0, date: '2026-09-23' },
+      },
+    })
+    expect(scheduler.status().earningsToday[id]).toBeUndefined()
+    expect(scheduler.status().earningsToday.fresh?.credit).toBe(30)
+  })
+
+  it('ignores an entry with no date at all', async () => {
+    const { pool, client } = await harness(1)
+    const id = pool.list()[0]!.id
+    const scheduler = new WorkBuddyScheduler(pool, client, {
+      enabled: true,
+      now: () => beijing(2026, 8, 23, 11, 0, 0),
+      logger: {},
+      loadEarnings: () => ({
+        date: '2026-09-23',
+        accounts: { [id]: { credit: 999, energy: 0, claimed: 1, checkinCredit: 0, bonusCredit: 0, travelCredit: 0, compensationCredit: 0 } },
+      } as never),
+    })
+    expect(scheduler.status().earningsToday).toEqual({})
+  })
 })

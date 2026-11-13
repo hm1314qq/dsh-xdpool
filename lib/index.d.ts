@@ -3904,6 +3904,19 @@ export declare class WorkBuddyScheduler {
    * claim yesterday as today.
    */
   applyEarningsLedger(ledger: AutomationLedger): void;
+  /**
+   * Shared restore path for both the constructor and {@link applyEarningsLedger}.
+   *
+   * TWO date checks, not one. The outer `ledger.date` is written by
+   * `persistEarnings()` at the moment of the *last* gain, while each entry's
+   * `date` is the day that account actually earned. They can disagree: a host
+   * that rewrites the settings document on a config edit (or a ledger patched
+   * by hand) can leave today's outer date wrapped around yesterday's entries.
+   * Trusting only the outer date presented stale rewards under today's label —
+   * exactly the "今天领了 0 分但卡片显示有收益" confusion. A missing/blank
+   * entry date is treated as stale too, since every writer stamps it.
+   */
+  private restoreEarnings;
   applyConfig(options: AutomationOptions): void;
   /** Hours for one job, used by the loop and the status document. */
   private hoursOf;

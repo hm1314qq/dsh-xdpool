@@ -29426,6 +29426,8 @@ import { credentialRef } from "@deepseek-ai/dsh-credentials";
 
 // vendor/channel-pack/src/channel-pack-store.ts
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { createHash as createHashState } from "node:crypto"; // [xdpool-local] store-reload
+import { watch as watchStateFile } from "node:fs"; // [xdpool-local] state-watch
 import { homedir } from "node:os";
 import { join } from "node:path";
 import Schema from "@deepseek-ai/schemastery";
@@ -30015,6 +30017,10 @@ var AccountPool = class {
    */
   providerOrderCache = [];
   /** 是否已完成首次载入。 */
+  // [xdpool-local] store-reload: content hash of the document we last read or wrote.
+  // `null` means "unknown" (first run, memory backend, or a read failure),
+  // and an unknown fingerprint never blocks a write.
+  knownFingerprint = null;
   loaded = false;
   /**
    * 状态文档落盘的**串行链**（见 {@link queueStoreSave}）。
@@ -30039,6 +30045,8 @@ var AccountPool = class {
       this.providerOrderCache = state.providerOrder ?? [];
     }
     this.loadLocks(state);
+    // [xdpool-local] store-reload: remember what we loaded, so an external edit is detectable.
+    this.knownFingerprint = this.currentFingerprint();
   }
   /**
    * 载入锁定表：独立文档是权威；它**不存在**时才从 state.json 的镜像字段迁移。
@@ -30105,8 +30113,30 @@ var AccountPool = class {
    * `.catch()` 派生量更新 {@link storeChain}，让**链本身不被一次失败打断**
    * ——否则后续所有写都会跟着拒绝，账号池进入永不落盘状态。
    */
+  // [xdpool-local] store-reload: if the file changed under us, re-read before writing.
+  //
+  // Without this, a hand-edited `state.json` is not just ignored — the next
+  // save re-serialises the stale in-memory copy over it and the edit is gone.
+  // Taking the file as authoritative for an UNTRACKED external change is the
+  // behaviour anyone editing it expects.
+  adoptExternalChanges() {
+    const now = this.currentFingerprint();
+    if (now === null) return false;
+    if (this.knownFingerprint === null) {
+      // First observation: adopt it as the baseline without touching memory.
+      this.knownFingerprint = now;
+      return false;
+    }
+    if (now === this.knownFingerprint) return false;
+    const result = this.reloadFromStore();
+    this.ctx?.logger?.warn?.(`[channel-pack] \u68C0\u6D4B\u5230 state.json \u88AB\u5916\u90E8\u4FEE\u6539\uFF0C\u5DF2\u91CD\u65B0\u8BFB\u53D6\u540E\u518D\u5199\uFF0C\u907F\u514D\u8986\u76D6`);
+    return result.applied === true;
+  }
+
   queueStoreSave() {
     if (this.store.kind === "memory") return Promise.resolve();
+    // [xdpool-local] store-reload: re-read first when the file changed under us.
+    this.adoptExternalChanges();
     const next = this.storeChain.then(async () => {
       await this.store.save({
         accounts: this.cache,
@@ -30114,16 +30144,58 @@ var AccountPool = class {
         contextBudgets: this.contextBudgetCache,
         selectionTouched: this.selectionTouchedCache,
         ...this.lockFields(),
-        // ⚠️ 必须与账号、黑名单取自**同一时刻**的快照（见本方法的注释）：
-        // 分两次快照会让同一份文档里的字段互相矛盾。
         gatewayEnabled: this.gatewayEnabledCache,
         providerOrder: this.providerOrderCache
       });
+      // [xdpool-local] store-reload: our own write becomes the new baseline.
+      this.knownFingerprint = this.currentFingerprint();
     });
     this.storeChain = next.catch(() => {
     });
     return next;
   }
+  // [xdpool-local] store-reload: hash the document as it exists on disk RIGHT NOW.
+  //
+  // Content, not mtime: save() is a tmp+rename atomic write and two of them
+  // can land inside one filesystem timestamp tick on Windows.
+  currentFingerprint() {
+    if (this.store.kind === "memory") return null;
+    const path = this.store.path;
+    if (typeof path !== "string") return null;
+    try {
+      return createHashState("sha256").update(readFileSync(path)).digest("hex");
+    } catch {
+      // Missing file (first run) or unreadable: unknown, do not block writes.
+      return null;
+    }
+  }
+  /**
+   * Re-read the state document and replace every in-memory copy.
+   *
+   * Exposed as `account.reload`. It exists because a user who edits
+   * `state.json` (or restores a backup, or removes a dead credential by hand)
+   * currently has to restart the whole host for the change to be seen — and
+   * before this patch a later save would have reverted it anyway.
+   *
+   * Best effort by contract: an unreadable or absent document leaves the
+   * current copy in place and reports it, rather than emptying the pool.
+   */
+  reloadFromStore() {
+    if (this.store.kind === "memory") return { applied: false, reason: "memory-store" };
+    const state = this.store.load();
+    if (state === void 0) return { applied: false, reason: "unreadable" };
+    this.cache = state.accounts;
+    this.modelCache = state.disabledModels;
+    this.contextBudgetCache = state.contextBudgets ?? {};
+    this.selectionTouchedCache = state.selectionTouched ?? {};
+    this.gatewayEnabledCache = state.gatewayEnabled !== false;
+    this.providerOrderCache = state.providerOrder ?? [];
+    this.loadLocks(state);
+    this.loaded = true;
+    this.knownFingerprint = this.currentFingerprint();
+    return { applied: true, accounts: this.cache.length };
+  }
+
   /**
    * 持久化账号列表（同时更新进程内权威副本）。
    *
@@ -60335,13 +60407,16 @@ import { existsSync as existsSync8, mkdirSync as mkdirSync6, readFileSync as rea
 import { join as join7 } from "node:path";
 var AUTO_CHECKIN_FILE = "auto-checkin.json";
 var SCHEMA4 = "dsh-codearts-auth/auto-checkin/v1";
+// [xdpool-local] auto-checkin-details: the last run, account by account, for the details dialog.
 var DEFAULT_AUTO_CHECKIN = {
   enabled: true,
   lastDate: "",
   lastResult: "",
   lastAt: 0,
   channels: [],
-  dismissedRunAt: 0
+  dismissedRunAt: 0,
+  details: [],
+  history: []
 };
 var DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 var MAX_CHANNEL_ENTRIES = 24;
@@ -60358,6 +60433,132 @@ function sanitizeChannels(raw) {
   }
   return out;
 }
+// [xdpool-local] auto-checkin-details: per-account rows from the last run, kept bounded so a
+// provider with many accounts/plans cannot grow the settings file without limit.
+var MAX_DETAIL_ENTRIES = 200;
+function sanitizeDetails(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) continue;
+    const record = item;
+    if (typeof record.provider !== "string" || record.provider.length === 0) continue;
+    if (typeof record.status !== "string") continue;
+    const row = {
+      provider: record.provider.slice(0, 40),
+      status: record.status.slice(0, 40),
+    };
+    if (typeof record.accountId === "string") row.accountId = record.accountId.slice(0, 80);
+    if (typeof record.nickname === "string") row.nickname = record.nickname.slice(0, 80);
+    if (typeof record.reason === "string") row.reason = record.reason.slice(0, 300);
+    if (typeof record.unit === "string") row.unit = record.unit.slice(0, 20);
+    if (typeof record.amount === "number" && Number.isFinite(record.amount)) row.amount = record.amount;
+    if (typeof record.code === "number" && Number.isFinite(record.code)) row.code = record.code;
+    out.push(row);
+    if (out.length >= MAX_DETAIL_ENTRIES) break;
+  }
+  return out;
+}
+
+// [xdpool-local] auto-checkin-history: rolling history. Two independent bounds: a TIME window
+// (30 days) and an ENTRY count (120). The count matters because a failed
+// pass retries every hour — a bad day must not push out the whole month.
+var MAX_HISTORY_DAYS = 30;
+var MAX_HISTORY_ENTRIES = 120;
+var HISTORY_WINDOW_MS = MAX_HISTORY_DAYS * 24 * 3600 * 1000;
+function sanitizeHistoryTotals(raw) {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  const record = raw;
+  const out = {};
+  for (const key of ["claimed", "failed", "alreadyClaimed", "inactive", "credit"]) {
+    if (typeof record[key] === "number" && Number.isFinite(record[key])) out[key] = record[key];
+  }
+  return out;
+}
+function sanitizeHistory(raw, nowMs = Date.now()) {
+  if (!Array.isArray(raw)) return [];
+  const cutoff = nowMs - HISTORY_WINDOW_MS;
+  const seen = new Set();
+  const out = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) continue;
+    const record = item;
+    if (typeof record.at !== "number" || !Number.isFinite(record.at) || record.at <= 0) continue;
+    if (record.at < cutoff) continue;
+    if (seen.has(record.at)) continue;
+    seen.add(record.at);
+    out.push({
+      at: record.at,
+      date: typeof record.date === "string" && DATE_RE.test(record.date) ? record.date : "",
+      result: typeof record.result === "string" ? record.result.slice(0, 400) : "",
+      totals: sanitizeHistoryTotals(record.totals),
+      ...typeof record.runs === "number" && Number.isFinite(record.runs) && record.runs > 0 ? { runs: Math.floor(record.runs) } : {},
+      // Reuse the same whitelist as the live `details` field, so a dirty
+      // history entry can never smuggle a huge or malformed row into the UI.
+      details: sanitizeDetails(record.details),
+    });
+    if (out.length >= MAX_HISTORY_ENTRIES) break;
+  }
+  return out.sort((a, b) => a.at - b.at);
+}
+/** Append one run, de-duplicated by `at`, then apply both bounds. */
+/** [xdpool-local] auto-checkin-retry-policy: two runs are "the same" when nothing a reader cares about differs. */
+// [xdpool-local] auto-checkin-dedupe-key: compare what the dialog SHOWS, not the internal account id.
+//
+// TRAE (and any QR-linked channel) can re-mint an account id for the same
+// nickname between two runs — measured as trae-feda3732 -> trae-c476bfb4 on
+// an unchanged "今天已签到". Keying on that id made every steady day look
+// like a new run, which is the opposite of what this exists to prevent.
+function historyRowKey(row) {
+  if (row === null || typeof row !== "object") return "";
+  // Deliberately NO accountId: it is an internal handle, and it drifts.
+  return [
+    String(row.provider ?? ""),
+    String(row.nickname ?? ""),
+    String(row.status ?? ""),
+    String(row.amount ?? ""),
+    String(row.unit ?? ""),
+    String(row.code ?? ""),
+    String(row.reason ?? ""),
+  ].join("\u0001");
+}
+function historyDetailsKey(details) {
+  if (!Array.isArray(details)) return "";
+  // Sort first: providers are iterated in whatever order the pool lists
+  // them, and a reordering is not a new outcome.
+  return details.map(historyRowKey).sort().join("\u0002");
+}
+function sameHistoryRun(a, b) {
+  if (a === null || typeof a !== "object") return false;
+  // `at` and `runs` are bookkeeping; the outcome is the rest.
+  return a.result === b.result
+    && JSON.stringify(a.totals ?? {}) === JSON.stringify(b.totals ?? {})
+    && historyDetailsKey(a.details) === historyDetailsKey(b.details);
+}
+/** Append one run, collapsing a repeat of the previous one. */
+function appendHistory(existing, entry, nowMs) {
+  const cutoff = nowMs - HISTORY_WINDOW_MS;
+  const kept = (Array.isArray(existing) ? existing : []).filter(
+    (row) => row !== null && typeof row === "object"
+      && typeof row.at === "number" && Number.isFinite(row.at)
+      && row.at >= cutoff && row.at !== entry.at,
+  );
+  const last = kept[kept.length - 1];
+  if (last !== void 0 && sameHistoryRun(last, entry)) {
+    // Same outcome as the previous pass: count it, move the stamp forward,
+    // and keep the original position so the ordering still reads oldest-first.
+    kept[kept.length - 1] = {
+      ...last,
+      at: entry.at,
+      date: entry.date,
+      runs: (typeof last.runs === "number" ? last.runs : 1) + 1,
+    };
+    return kept.slice(-MAX_HISTORY_ENTRIES);
+  }
+  kept.push({ ...entry, runs: 1 });
+  return kept.slice(-MAX_HISTORY_ENTRIES);
+}
+
 function sanitizeAutoCheckin(raw) {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return { ...DEFAULT_AUTO_CHECKIN };
   const record = raw;
@@ -60372,6 +60573,8 @@ function sanitizeAutoCheckin(raw) {
     lastResult: typeof record.lastResult === "string" ? record.lastResult : "",
     lastAt: ms(record.lastAt),
     channels: sanitizeChannels(record.channels),
+    details: sanitizeDetails(record.details),
+    history: sanitizeHistory(record.history, Date.now()),
     dismissedRunAt: ms(record.dismissedRunAt)
   };
 }
@@ -60380,6 +60583,11 @@ function utc8DateString(nowMs = Date.now()) {
 }
 var DSH_CHANNEL_PACK_AUTO_CHECKIN_DELAY_MS = "DSH_CHANNEL_PACK_AUTO_CHECKIN_DELAY_MS";
 var AUTO_CHECKIN_DELAY_MS = 3e4;
+// [xdpool-local] auto-checkin: how often to re-check whether a new UTC+8 day has begun.
+// 1 hour is short enough to collect the reward promptly after midnight,
+// long enough that a permanently failing channel cannot hammer the upstream.
+var DSH_CHANNEL_PACK_AUTO_CHECKIN_INTERVAL_MS = "DSH_CHANNEL_PACK_AUTO_CHECKIN_INTERVAL_MS";
+var AUTO_CHECKIN_INTERVAL_MS = 36e5;
 function autoCheckinDelayMs(env = process.env) {
   const raw = env[DSH_CHANNEL_PACK_AUTO_CHECKIN_DELAY_MS];
   if (typeof raw !== "string" || raw.trim().length === 0) return AUTO_CHECKIN_DELAY_MS;
@@ -60421,6 +60629,8 @@ var FileAutoCheckinStore = class {
       lastResult: doc.lastResult,
       lastAt: doc.lastAt,
       channels: doc.channels,
+      details: doc.details ?? [],
+      history: doc.history ?? [],
       dismissedRunAt: doc.dismissedRunAt
     }, null, 2), "utf-8");
     renameSync6(tmp, this.path);
@@ -60456,8 +60666,51 @@ function describeRun(totals) {
   if (parts.length === 0) return `${totals.providers} \u4E2A\u6E20\u9053\uFF1A\u6CA1\u6709\u9700\u8981\u9886\u53D6\u7684\u8D26\u53F7`;
   return `${totals.providers} \u4E2A\u6E20\u9053\uFF1A${parts.join("\uFF0C")}`;
 }
-function shouldMarkToday(totals) {
-  return totals.coversToday > 0;
+// [xdpool-local] auto-checkin: a day is only "done" when NOTHING failed. A single
+// successful account used to close the day for every account that failed
+// alongside it, and with no recurring timer there was no retry at all.
+// [xdpool-local] auto-checkin-retry-policy: which failures are worth retrying.
+//
+// A blip (timeout, 5xx, 429) is worth another pass later today. A refused
+// login, a risk-control block, a provider with no check-in API or a finished
+// promotion is not: retrying only burns upstream quota and fills the history.
+// Anything unrecognised is treated as RETRYABLE on purpose — an unknown error
+// is more likely transient than permanent, and wrongly giving up is worse than
+// one extra cheap pass.
+var PERMANENT_FAILURE_PATTERNS = [
+  /authenticate/iu, /unauthoriz/iu, /forbidden/iu, /invalid_grant/iu,
+  /\b40[13]\b/u, /unusual activity/iu, /blocked/iu,
+  /not supported/iu, /unsupported/iu,
+  /expired/iu,
+  /\u767B\u5F55\u5DF2\u5931\u6548/u, /\u91CD\u65B0\u767B\u5F55/u, /\u51ED\u636E/u,
+  /\u98CE\u63A7/u, /\u4E0D\u652F\u6301/u,
+  /\u6D3B\u52A8\u5DF2\u7ED3\u675F/u, /\u5DF2\u8FC7\u671F/u, /\u6D3B\u52A8\u69FD\u4F4D\u67E5\u8BE2\u5931\u8D25/u,
+];
+function isRetryableFailure(row) {
+  if (row === null || typeof row !== "object") return true;
+  if (row.status !== "failed") return false;
+  // A risk-control / auth business code is permanent even when the message is
+  // unhelpful: 1001 and 3012 were both measured as refusals.
+  if (row.code === 1001 || row.code === 3012) return false;
+  if (row.code === 401 || row.code === 403) return false;
+  const text = typeof row.reason === "string" ? row.reason : "";
+  if (text === "") return true;
+  return !PERMANENT_FAILURE_PATTERNS.some((pattern) => pattern.test(text));
+}
+/** How many rows would still be worth another pass today. */
+function retryableFailureCount(rows) {
+  let count = 0;
+  for (const row of rows) if (isRetryableFailure(row)) count += 1;
+  return count;
+}
+
+// [xdpool-local] auto-checkin-retry-policy: the day closes when nothing RETRYABLE failed. Permanent
+// failures stay visible on the card but must not keep the retry armed —
+// that is what made one broken account re-run all thirteen every hour.
+function shouldMarkToday(totals, retryableFailures) {
+  if (totals.coversToday <= 0) return false;
+  if (totals.errors > 0) return false;
+  return (retryableFailures ?? totals.failed) === 0;
 }
 function describeChannel(summary) {
   const parts = [];
@@ -60475,12 +60728,53 @@ function describeChannel(summary) {
   }
   return parts.join("\uFF0C");
 }
+// [xdpool-local] auto-checkin-details: flatten one provider's claim result into rows the dialog
+// can group. `results` is what every credits.claimAll branch returns; the
+// upstream's own message is kept verbatim as `reason` — it is the only
+// place that says WHY an account failed.
+function autoCheckinDetailRows(provider, result) {
+  if (!result.ok) {
+    const message = typeof result.error?.message === "string" ? result.error.message : "";
+    return [{ provider, status: "failed", reason: message !== "" ? message : "unknown-error" }];
+  }
+  const results = result.value?.results;
+  if (!Array.isArray(results) || results.length === 0) {
+    return [{ provider, status: "none", reason: "no-claimable-account" }];
+  }
+  const rows = [];
+  for (const entry of results) {
+    const outcome = entry?.outcome;
+    const kind = typeof outcome?.kind === "string" ? outcome.kind : "failed";
+    const row = {
+      provider,
+      status: kind,
+      ...typeof entry?.accountId === "string" ? { accountId: entry.accountId } : {},
+      ...typeof entry?.nickname === "string" ? { nickname: entry.nickname } : {},
+      ...typeof outcome?.credit === "number" && Number.isFinite(outcome.credit) ? { amount: outcome.credit } : {},
+      ...typeof outcome?.unit === "string" ? { unit: outcome.unit } : {},
+      ...typeof outcome?.code === "number" && Number.isFinite(outcome.code) ? { code: outcome.code } : {},
+      ...typeof outcome?.message === "string" && outcome.message !== "" ? { reason: outcome.message } : {},
+    };
+    rows.push(row);
+  }
+  return rows;
+}
+
 function createAutoCheckin(deps) {
   const now = deps.now ?? (() => Date.now());
   let doc = deps.store.load();
   let running2 = false;
   let inflight = null;
   let pending = null;
+  // [xdpool-local] auto-checkin: the cross-day timer. `pending` is the one-shot mount delay;
+  // `recurring` is what wakes the check-in on a NEW day without a restart.
+  let recurring = null;
+  function autoCheckinIntervalMs(env = process.env) {
+    const raw = env[DSH_CHANNEL_PACK_AUTO_CHECKIN_INTERVAL_MS];
+    if (typeof raw !== "string" || raw.trim().length === 0) return AUTO_CHECKIN_INTERVAL_MS;
+    const parsed = Number(raw.trim());
+    return Number.isFinite(parsed) && parsed >= 1000 ? parsed : AUTO_CHECKIN_INTERVAL_MS;
+  }
   const today = () => utc8DateString(now());
   function state() {
     return {
@@ -60491,10 +60785,34 @@ function createAutoCheckin(deps) {
       lastResult: doc.lastResult,
       lastAt: doc.lastAt,
       channels: doc.channels.map((entry) => ({ ...entry })),
+      // [xdpool-local] auto-checkin-details: the per-account breakdown shown by the details dialog.
+      details: (doc.details ?? []).map((entry) => ({ ...entry })),
+      // [xdpool-local] auto-checkin-history: newest-last, for the dialog's date switcher.
+      history: (doc.history ?? []).map((entry) => ({
+        ...entry,
+        details: (entry.details ?? []).map((row) => ({ ...row })),
+      })),
       // 面板据它决定要不要渲染那行常驻状态文字
       dismissed: doc.lastAt > 0 && doc.dismissedRunAt === doc.lastAt
     };
   }
+  // [xdpool-local] auto-checkin-history: one entry per run, including failed/retry passes.
+  function historyEntry(totals, result, detailRows, at) {
+    return {
+      at,
+      date: utc8DateString(at),
+      result,
+      totals: {
+        claimed: totals.claimed,
+        failed: totals.failed,
+        alreadyClaimed: totals.alreadyClaimed,
+        inactive: totals.inactive,
+        credit: totals.totalCredit,
+      },
+      details: detailRows.slice(0, MAX_DETAIL_ENTRIES),
+    };
+  }
+
   async function performRun() {
     const totals = emptyTotals2();
     let providers = [];
@@ -60505,10 +60823,13 @@ function createAutoCheckin(deps) {
       return;
     }
     const channels = [];
+    // [xdpool-local] auto-checkin-details: every row of the last run, across all providers.
+    const details = [];
     for (const provider of providers) {
       if (isAutoCheckinExcluded(provider)) {
         totals.skipped += 1;
         channels.push({ provider, text: "\u9700\u624B\u52A8\u7B7E\u5230" });
+        details.push({ provider, status: "skipped", reason: "manual-checkin-required" });
         continue;
       }
       let result;
@@ -60517,6 +60838,7 @@ function createAutoCheckin(deps) {
       } catch (error) {
         totals.errors += 1;
         channels.push({ provider, text: "\u51FA\u9519" });
+        details.push(...autoCheckinDetailRows(provider, result ?? { ok: false, error: { message: "claim-call-failed" } }));
         deps.warn?.(`[channel-pack] \u81EA\u52A8\u7B7E\u5230\uFF1A${provider} \u8C03\u7528\u5F02\u5E38: ${String(error)}`);
         continue;
       }
@@ -60525,10 +60847,12 @@ function createAutoCheckin(deps) {
         if (isUnsupportedCheckin(message2)) {
           totals.skipped += 1;
           channels.push({ provider, text: "\u65E0\u7B7E\u5230\u63A5\u53E3" });
+          details.push({ provider, status: "unsupported", reason: message2 !== "" ? message2 : "no-checkin-api" });
           continue;
         }
         totals.errors += 1;
         channels.push({ provider, text: "\u51FA\u9519" });
+        details.push(...autoCheckinDetailRows(provider, result ?? { ok: false, error: { message: "claim-call-failed" } }));
         deps.warn?.(`[channel-pack] \u81EA\u52A8\u7B7E\u5230\uFF1A${provider} \u5931\u8D25: ${message2 || "\u672A\u77E5\u9519\u8BEF"}`);
         continue;
       }
@@ -60536,6 +60860,7 @@ function createAutoCheckin(deps) {
       const summary = result.value?.summary;
       if (summary === void 0) {
         channels.push({ provider, text: "\u65E0\u53EF\u9886" });
+        details.push(...autoCheckinDetailRows(provider, result));
         continue;
       }
       totals.claimed += summary.claimed;
@@ -60548,19 +60873,45 @@ function createAutoCheckin(deps) {
       totals.failed += summary.failed;
       totals.coversToday += summary.coversToday ?? summary.claimed + summary.alreadyClaimed;
       channels.push({ provider, text: describeChannel(summary) });
+      details.push(...autoCheckinDetailRows(provider, result));
     }
-    if (!shouldMarkToday(totals)) {
+    // [xdpool-local] auto-checkin-retry-policy: only retryable failures keep the day open.
+    const retryable = retryableFailureCount(details);
+    if (!shouldMarkToday(totals, retryable)) {
       deps.warn?.(
         `[channel-pack] \u81EA\u52A8\u7B7E\u5230\u672A\u8BB0\u5165\u4ECA\u65E5\uFF08\u4E0B\u6B21\u542F\u52A8\u4F1A\u91CD\u8BD5\uFF09\uFF1A${describeRun(totals)}`
       );
+      // [xdpool-local] auto-checkin-details: a FAILED pass is exactly when the
+      // per-account reasons matter most. Do not update lastDate/lastAt (that is
+      // what keeps the retry armed), but DO persist the breakdown so the
+      // details dialog can answer "which account failed, and why".
+      const failedAt = now();
+      doc = {
+        ...doc,
+        details: details.slice(0, MAX_DETAIL_ENTRIES),
+        history: appendHistory(doc.history, historyEntry(totals, describeRun(totals), details, failedAt), failedAt),
+      };
+      try {
+        await deps.store.save(doc);
+      } catch (error) {
+        deps.warn?.(`[channel-pack] \u81EA\u52A8\u7B7E\u5230\u660E\u7EC6\u5199\u5165\u5931\u8D25: ${String(error)}`);
+      }
       return;
     }
+    // [xdpool-local] auto-checkin-retry-policy: permanent failures did not keep the day open.
+    if (totals.failed > 0 && retryable === 0) {
+      deps.warn?.(`[channel-pack] \u81EA\u52A8\u7B7E\u5230\uFF1A${String(totals.failed)} \u4E2A\u6C38\u4E45\u6027\u5931\u8D25\uFF08\u51ED\u636E/\u98CE\u63A7/\u65E0\u63A5\u53E3\uFF09\uFF0C\u4ECA\u65E5\u4E0D\u518D\u91CD\u8BD5`);
+    }
+    // [xdpool-local] auto-checkin-history: record this run before overwriting the snapshot.
+    const runAt = now();
     doc = {
       ...doc,
       lastDate: today(),
       lastResult: describeRun(totals),
-      lastAt: now(),
+      lastAt: runAt,
       channels,
+      details: details.slice(0, MAX_DETAIL_ENTRIES),
+      history: appendHistory(doc.history, historyEntry(totals, describeRun(totals), details, runAt), runAt),
       // ⚠️ 新一轮跑完要**清掉上一次的「已关闭」标记**：否则用户关过一次后，
       // 明天的新结果会被旧标记静默藏住（`dismissed` 的判据是 lastAt 相等）。
       dismissedRunAt: 0
@@ -60572,10 +60923,14 @@ function createAutoCheckin(deps) {
     }
     deps.warn?.(`[channel-pack] \u81EA\u52A8\u7B7E\u5230\u5B8C\u6210\uFF08${today()}\uFF09\uFF1A${doc.lastResult}`);
   }
-  function runIfDue() {
+  // [xdpool-local] auto-checkin-run-now: one place that actually starts a pass. `force` skips
+  // ONLY the "already covered today" gate; the enabled switch and the
+  // in-flight guard still apply, so a manual click can never overlap a
+  // scheduled pass or resurrect a switched-off automation.
+  function startRun(force) {
     if (inflight !== null) return inflight;
     if (!doc.enabled) return Promise.resolve();
-    if (doc.lastDate !== "" && doc.lastDate === today()) return Promise.resolve();
+    if (!force && doc.lastDate !== "" && doc.lastDate === today()) return Promise.resolve();
     running2 = true;
     const task = performRun().catch((error) => {
       deps.warn?.(`[channel-pack] \u81EA\u52A8\u7B7E\u5230\u5F02\u5E38: ${String(error)}`);
@@ -60586,8 +60941,16 @@ function createAutoCheckin(deps) {
     inflight = task;
     return task;
   }
+  function runIfDue() {
+    return startRun(false);
+  }
   return {
     state,
+    // [xdpool-local] auto-checkin-run-now: the details dialog's "claim now" button.
+    async runNow() {
+      await startRun(true);
+      return state();
+    },
     async setEnabled(enabled) {
       doc = { ...doc, enabled };
       await deps.store.save(doc);
@@ -60595,12 +60958,18 @@ function createAutoCheckin(deps) {
       return state();
     },
     start() {
-      if (pending !== null) return;
+      if (pending !== null || recurring !== null) return;
       const ms = deps.delayMs ?? autoCheckinDelayMs();
       const fire = () => {
         pending = null;
         void runIfDue();
       };
+      // [xdpool-local] auto-checkin: re-check on a timer for as long as the fiber lives.
+      // `runIfDue` itself refuses a second pass on the same day, so this is
+      // cheap and safe: it only ever fires a claim when the UTC+8 date has
+      // rolled over (or the previous pass left failures behind).
+      const intervalMs = deps.intervalMs ?? autoCheckinIntervalMs();
+      recurring = (deps.intervalSchedule ?? defaultIntervalSchedule)(fire, intervalMs);
       if (ms <= 0) {
         fire();
         return;
@@ -60620,9 +60989,20 @@ function createAutoCheckin(deps) {
     stop() {
       pending?.cancel();
       pending = null;
-    }
+      // [xdpool-local] auto-checkin: otherwise the recurring timer outlives the fiber.
+      recurring?.cancel();
+      recurring = null;
+    },
   };
 }
+// [xdpool-local] auto-checkin: a repeating, unref'd timer with the same cancel() shape
+// as defaultSchedule, so start()/stop() can treat both identically.
+function defaultIntervalSchedule(fn, ms) {
+  const timer = setInterval(fn, ms);
+  timer.unref?.();
+  return { cancel: () => clearInterval(timer) };
+}
+
 function defaultSchedule(fn, ms) {
   const timer = setTimeout(fn, ms);
   timer.unref?.();
@@ -61656,6 +62036,11 @@ function registerChannelPackEndpoints(ctx, pool, codearts, buddy, workbuddy, lob
         const req = payload;
         await pool.updateAccount(req.accountId, req.patch);
         return { ok: true, value: void 0 };
+      }
+      // [xdpool-local] store-reload: apply an on-disk edit WITHOUT restarting the host.
+      case "account.reload": {
+        const result = pool.reloadFromStore();
+        return { ok: true, value: result };
       }
       case "account.delete": {
         const req = payload;
@@ -63458,6 +63843,12 @@ function registerChannelPackEndpoints(ctx, pool, codearts, buddy, workbuddy, lob
             const value2 = { autoCheckin: await autoCheckin.dismiss() };
             return { ok: true, value: value2 };
           }
+        }
+        // [xdpool-local] auto-checkin-run-now: explicit manual batch claim. Awaited so the
+        // dialog receives the NEW state (details + history) in one call.
+        if (req.run === true) {
+          const value3 = { autoCheckin: await autoCheckin.runNow() };
+          return { ok: true, value: value3 };
         }
         if (req.enabled === void 0) {
           const value2 = { autoCheckin: autoCheckin.state() };
@@ -68498,6 +68889,99 @@ function apply(ctx, config = {}) {
   );
   const service = new CodeArtsAuth(ctx);
   const pool = new AccountPool(ctx);
+  // [xdpool-local] state-watch: apply external state.json edits automatically.
+  //
+  // Two triggers on purpose, because they fail differently:
+  //   - fs.watch answers in well under a second but dies on the atomic
+  //     rename that save() performs (watcher keeps the old inode),
+  //   - the poll is slower but cannot be defeated by rename semantics.
+  // Both call the same debounced applier, which only acts when the content
+  // hash actually changed — so running both costs nothing extra.
+  let stateWatchRetryTimer;
+  let statePollTimer;
+  let stateApplyTimer;
+  let stateWatcher;
+  let stateDisposed = false;
+  const stateFile = pool.store?.path;
+  const debounceMs = 250;
+  const pollMs = (() => {
+    const raw = process.env.DSH_CHANNEL_PACK_RELOAD_POLL_MS;
+    if (typeof raw !== "string" || raw.trim() === "") return 8e3;
+    const parsed = Number(raw.trim());
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 8e3;
+  })();
+  function applyExternalChange(reason) {
+    if (stateDisposed) return;
+    try {
+      const applied = pool.adoptExternalChanges?.();
+      if (applied === true) ctx.logger?.info?.(`[channel-pack] \u5DF2\u81EA\u52A8\u8BFB\u53D6\u5916\u90E8\u4FEE\u6539\u7684 state.json\uFF08${reason}）`);
+    } catch (error) {
+      ctx.logger?.warn?.(`[channel-pack] \u81EA\u52A8\u8BFB\u53D6 state.json \u5931\u8D25: ${String(error)}`);
+    }
+  }
+  function scheduleApply(reason) {
+    if (stateDisposed) return;
+    if (stateApplyTimer !== void 0) clearTimeout(stateApplyTimer);
+    stateApplyTimer = setTimeout(() => {
+      stateApplyTimer = void 0;
+      applyExternalChange(reason);
+    }, debounceMs);
+    stateApplyTimer.unref?.();
+  }
+  /** (Re)arm the watcher. Called at start and after every rename. */
+  function armStateWatcher() {
+    if (stateDisposed || stateFile === void 0) return;
+    try {
+      stateWatcher?.close();
+    } catch {}
+    stateWatcher = void 0;
+    try {
+      // The file may be mid-replace (or genuinely gone). `fs.watch` throws
+      // ENOENT rather than returning a dead watcher, and an uncaught throw
+      // here would take the whole host down — so this stays inside the try
+      // and simply retries on the next poll.
+      if (!existsSync(stateFile)) return;
+      const watcher = watchStateFile(stateFile, { persistent: false }, () => {
+        scheduleApply("watch");
+        // The rename replacing state.json invalidates this watcher's inode.
+        // Re-arm on the next tick so the following save is still observed.
+        if (stateWatchRetryTimer !== void 0) clearTimeout(stateWatchRetryTimer);
+        stateWatchRetryTimer = setTimeout(() => {
+          stateWatchRetryTimer = void 0;
+          armStateWatcher();
+        }, 500);
+        stateWatchRetryTimer.unref?.();
+      });
+      watcher.on?.("error", () => {
+        try { watcher.close(); } catch {}
+        if (stateDisposed) return;
+        // Never leave the state silent: re-arm once, then rely on the poll.
+        if (stateWatchRetryTimer !== void 0) clearTimeout(stateWatchRetryTimer);
+        stateWatchRetryTimer = setTimeout(() => {
+          stateWatchRetryTimer = void 0;
+          armStateWatcher();
+        }, 2e3);
+        stateWatchRetryTimer.unref?.();
+      });
+      watcher.unref?.();
+      stateWatcher = watcher;
+    } catch (error) {
+      ctx.logger?.warn?.(`[channel-pack] \u65E0\u6CD5\u76D1\u542C state.json\uFF0C\u6539\u7528\u8F6E\u8BE2: ${String(error)}`);
+    }
+  }
+  if (stateFile !== void 0 && process.env.DSH_CHANNEL_PACK_WATCH_STATE !== "0") armStateWatcher();
+  if (stateFile !== void 0 && pollMs > 0) {
+    statePollTimer = setInterval(() => scheduleApply("poll"), pollMs);
+    statePollTimer.unref?.();
+  }
+  ctx.effect?.(() => () => {
+    // [xdpool-local] state-watch: never outlive the fiber.
+    stateDisposed = true;
+    if (stateApplyTimer !== void 0) clearTimeout(stateApplyTimer);
+    if (stateWatchRetryTimer !== void 0) clearTimeout(stateWatchRetryTimer);
+    if (statePollTimer !== void 0) clearInterval(statePollTimer);
+    try { stateWatcher?.close(); } catch {}
+  }, "channel-pack: state watch");
   configureDeadModelStore(ctx);
   // ── 本地适配（dsh-xdpool）：扫码渠道**首次**登录成功后默认静音该渠道 ──
   // 需求（2026-10-16）：新扫码的渠道不该立刻把它的全部模型灌进选择器；

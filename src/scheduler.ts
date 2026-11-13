@@ -647,11 +647,7 @@ export class WorkBuddyScheduler {
     // answer "what did the automation get TODAY", so yesterday's totals must not
     // be presented as today's.
     const restored = options.loadEarnings?.()
-    const today = dayKey(this.now())
-    if (restored !== undefined && restored.date === today) {
-      for (const [id, entry] of Object.entries(restored.accounts)) this.earnings.set(id, entry)
-      this.earningsDate = today
-    }
+    if (restored !== undefined) this.restoreEarnings(restored)
     this.enabled = options.enabled ?? false
     this.checkinHours = hoursOrDefault(options.checkinHours, DEFAULT_AUTOMATION_HOURS.checkin)
     this.reportHours = hoursOrDefault(options.reportHours, DEFAULT_AUTOMATION_HOURS.report)
@@ -701,9 +697,29 @@ export class WorkBuddyScheduler {
    * claim yesterday as today.
    */
   applyEarningsLedger(ledger: AutomationLedger): void {
+    this.restoreEarnings(ledger)
+  }
+
+  /**
+   * Shared restore path for both the constructor and {@link applyEarningsLedger}.
+   *
+   * TWO date checks, not one. The outer `ledger.date` is written by
+   * `persistEarnings()` at the moment of the *last* gain, while each entry's
+   * `date` is the day that account actually earned. They can disagree: a host
+   * that rewrites the settings document on a config edit (or a ledger patched
+   * by hand) can leave today's outer date wrapped around yesterday's entries.
+   * Trusting only the outer date presented stale rewards under today's label —
+   * exactly the "今天领了 0 分但卡片显示有收益" confusion. A missing/blank
+   * entry date is treated as stale too, since every writer stamps it.
+   */
+  private restoreEarnings(ledger: AutomationLedger): void {
     const today = dayKey(this.now())
     if (ledger.date !== today) return
-    for (const [id, entry] of Object.entries(ledger.accounts)) this.earnings.set(id, entry)
+    this.earnings.clear()
+    for (const [id, entry] of Object.entries(ledger.accounts)) {
+      if (entry.date !== today) continue
+      this.earnings.set(id, entry)
+    }
     this.earningsDate = today
   }
 

@@ -316,6 +316,39 @@ export function ChannelPoolSection({ t }: { readonly t?: Translate | undefined }
    */
   const [loading, setLoading] = useState<boolean>(() => poolSnapshot === undefined)
   const [notice, setNotice] = useState<string | undefined>(undefined)
+  /** True while `account.reload` is in flight. */
+  const [reloading, setReloading] = useState(false)
+  /**
+   * Apply an external edit to `channel-pack/state.json` without a restart.
+   *
+   * The pack keeps the account list in memory for the life of the process and
+   * used to write that copy straight back over the file, so a hand edit was
+   * both ignored and destroyed. `account.reload` re-reads the document; the
+   * pack also re-reads before any write now, so the file wins over a stale
+   * memory copy.
+   */
+  const reloadFromDisk = async (): Promise<void> => {
+    setReloading(true)
+    try {
+      const envelope = await callPack('account.reload', {})
+      if (!mountedRef.current) return
+      if (!envelope.ok) {
+        setNotice(envelope.error?.message ?? 'reload refused')
+        return
+      }
+      invalidatePoolSnapshot()
+      await load()
+      if (!mountedRef.current) return
+      const applied = (envelope.value as { applied?: unknown } | undefined)?.applied
+      setNotice(
+        applied === false
+          ? (t?.('channelpool.reloadSkipped') ?? '磁盘状态不可读，已保留当前内存副本')
+          : (t?.('channelpool.reloadDone') ?? '已从磁盘重新读取账号状态'),
+      )
+    } finally {
+      if (mountedRef.current) setReloading(false)
+    }
+  }
   /** provider → the open list, or `undefined` for a card with both folded. */
   const [folds, setFolds] = useState<ReadonlyMap<string, Fold | undefined>>(new Map())
   /** provider → the set of model ids the user has ticked. */
@@ -887,6 +920,29 @@ export function ChannelPoolSection({ t }: { readonly t?: Translate | undefined }
       {error === undefined ? null
         : <p className="dsm-xdpool-error">{t?.('channelpool.loadError', { message: error }) ?? `Could not load channels: ${error}`}</p>}
       {notice === undefined ? null : <p className="dsm-xdpool-note">{notice}</p>}
+      {/*
+        Apply a hand edit to `channel-pack/state.json` without restarting DSH.
+        The pack caches the account list in memory for the whole process
+        (`ensureLoaded` runs once), so before `account.reload` existed the only
+        way to see an external edit — a restored backup, a deleted dead
+        credential, a hand-disabled account — was a full host restart. Worse, a
+        later save would have reverted the edit; the pack now re-reads before
+        writing, so disk wins.
+      */}
+      <div className="dsm-xdpool-cpool-toolbar">
+        <button
+          type="button"
+          className="dsm-xdpool-btn"
+          disabled={reloading}
+          onClick={() => { void reloadFromDisk() }}
+          title={t?.('channelpool.reloadHint')
+            ?? '重新读取 channel-pack/state.json，让手工改动立即生效（无需重启）'}
+        >
+          {reloading
+            ? (t?.('channelpool.reloading') ?? '重新读取中…')
+            : (t?.('channelpool.reload') ?? '重新读取磁盘')}
+        </button>
+      </div>
       <div className="dsm-xdpool-cpool-grid">
         {entries.map(entry => {
           const { channel, accounts, models, facts, balances, statuses, status } = entry

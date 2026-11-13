@@ -271,6 +271,15 @@ export const CHANNEL_PACK_METHODS: ReadonlySet<string> = new Set([
   'account.create',
   'account.delete',
   'account.list',
+  /**
+   * Re-read `channel-pack/state.json` into the running instance.
+   *
+   * The pack caches the account list for the life of the process, so without
+   * this a hand edit needed a full host restart — and a later save would have
+   * reverted it. The pack also re-reads before writing and watches the file
+   * now, so this is the manual escape hatch rather than the only path.
+   */
+  'account.reload',
   'account.refresh',
   'account.test',
   'account.update',

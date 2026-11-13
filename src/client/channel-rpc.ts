@@ -555,6 +555,49 @@ export function creditStatusesFrom(envelope: ChannelRpcEnvelope): readonly Chann
 }
 
 /**
+ * One row of the last auto check-in run, as recorded by the pack.
+ *
+ * `status` is the pack's outcome kind: `claimed` / `already-claimed` /
+ * `inactive` / `failed`, plus the provider-level `skipped` (manual check-in),
+ * `unsupported` (no check-in API) and `none` (nothing claimable). `reason` is
+ * the UPSTREAM's own message, kept verbatim — it is the only place that says
+ * why an account failed, so it must not be paraphrased or dropped.
+ */
+export interface ChannelAutoCheckinDetail {
+  provider: string
+  status: string
+  accountId?: string
+  nickname?: string
+  /** Credit/tokens granted, in `unit` (defaults to the vendor's credit). */
+  amount?: number
+  unit?: string
+  /** Failure/status message from the upstream, or a short marker. */
+  reason?: string
+  code?: number
+}
+
+/** One completed auto check-in run, kept for the last 30 days. */
+export interface ChannelAutoCheckinRun {
+  /** Epoch ms the run started; also the de-duplication key. */
+  at: number
+  /** UTC+8 calendar day, `YYYY-MM-DD`. */
+  date: string
+  /** The pack's one-line summary of this run. */
+  result: string
+  totals: {
+    claimed?: number
+    failed?: number
+    alreadyClaimed?: number
+    inactive?: number
+    credit?: number
+  }
+  /** How many identical consecutive passes this entry collapsed; 1 for a unique run. */
+  runs?: number
+  /** Per-account breakdown of THIS run. */
+  details: readonly ChannelAutoCheckinDetail[]
+}
+
+/**
  * The one global auto-check-in switch, from `usage.autoCheckin`.
  *
  * It is global on purpose — the pack runs it once for every provider that has
@@ -570,6 +613,56 @@ export interface ChannelAutoCheckin {
   lastResult?: string
   /** Per-provider outcome of the last run: `{provider, text}`. */
   channels: readonly { provider: string; text: string }[]
+  /** Per-account breakdown of the last run, for the details dialog. */
+  details: readonly ChannelAutoCheckinDetail[]
+  /** Epoch ms of the last completed run; undefined when it never ran. */
+  lastAt?: number
+  /** Rolling 30-day history, oldest first. Every retry is its own entry. */
+  history: readonly ChannelAutoCheckinRun[]
+}
+
+/** Shape one untrusted history entry; a malformed row is dropped, not fatal. */
+function autoCheckinRunFrom(raw: unknown): ChannelAutoCheckinRun | undefined {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const row = raw as Record<string, unknown>
+  if (typeof row['at'] !== 'number' || !Number.isFinite(row['at']) || row['at'] <= 0) return undefined
+  const totalsRaw = row['totals']
+  const totals: ChannelAutoCheckinRun['totals'] = {}
+  if (totalsRaw !== null && typeof totalsRaw === 'object' && !Array.isArray(totalsRaw)) {
+    const t = totalsRaw as Record<string, unknown>
+    for (const key of ['claimed', 'failed', 'alreadyClaimed', 'inactive', 'credit'] as const) {
+      if (typeof t[key] === 'number' && Number.isFinite(t[key])) totals[key] = t[key]
+    }
+  }
+  const details = row['details'] as unknown[] | undefined
+  return {
+    at: row['at'],
+    date: typeof row['date'] === 'string' ? row['date'] : '',
+    result: typeof row['result'] === 'string' ? row['result'] : '',
+    totals,
+    ...typeof row['runs'] === 'number' && Number.isFinite(row['runs']) && row['runs'] > 0
+      ? { runs: Math.floor(row['runs']) } : {},
+    details: Array.isArray(details)
+      ? details.map(autoCheckinDetailFrom).filter((r): r is ChannelAutoCheckinDetail => r !== undefined)
+      : [],
+  }
+}
+
+/** Shape one untrusted detail row. Unknown statuses are kept, not discarded. */
+function autoCheckinDetailFrom(raw: unknown): ChannelAutoCheckinDetail | undefined {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const row = raw as Record<string, unknown>
+  if (typeof row['provider'] !== 'string' || typeof row['status'] !== 'string') return undefined
+  return {
+    provider: row['provider'],
+    status: row['status'],
+    ...typeof row['accountId'] === 'string' ? { accountId: row['accountId'] } : {},
+    ...typeof row['nickname'] === 'string' ? { nickname: row['nickname'] } : {},
+    ...typeof row['amount'] === 'number' && Number.isFinite(row['amount']) ? { amount: row['amount'] } : {},
+    ...typeof row['unit'] === 'string' ? { unit: row['unit'] } : {},
+    ...typeof row['reason'] === 'string' && row['reason'] !== '' ? { reason: row['reason'] } : {},
+    ...typeof row['code'] === 'number' && Number.isFinite(row['code']) ? { code: row['code'] } : {},
+  }
 }
 
 export function autoCheckinFrom(envelope: ChannelRpcEnvelope): ChannelAutoCheckin | undefined {
@@ -579,11 +672,15 @@ export function autoCheckinFrom(envelope: ChannelRpcEnvelope): ChannelAutoChecki
   if (raw === null || typeof raw !== 'object') return undefined
   const state = raw as Record<string, unknown>
   const channels = (state['channels'] as unknown[] | undefined)
+  const details = state['details'] as unknown[] | undefined
+  const history = state['history'] as unknown[] | undefined
   return {
     enabled: state['enabled'] !== false,
     ranToday: state['ranToday'] === true,
     running: state['running'] === true,
     ...typeof state['lastResult'] === 'string' && state['lastResult'] !== '' ? { lastResult: state['lastResult'] } : {},
+    ...typeof state['lastAt'] === 'number' && Number.isFinite(state['lastAt']) && state['lastAt'] > 0
+      ? { lastAt: state['lastAt'] } : {},
     channels: Array.isArray(channels)
       ? channels
         .filter((entry): entry is { provider: string; text: string } =>
@@ -592,7 +689,29 @@ export function autoCheckinFrom(envelope: ChannelRpcEnvelope): ChannelAutoChecki
           && typeof (entry as { text?: unknown }).text === 'string')
         .map(entry => ({ provider: entry.provider, text: entry.text }))
       : [],
+    details: Array.isArray(details)
+      ? details.map(autoCheckinDetailFrom).filter((row): row is ChannelAutoCheckinDetail => row !== undefined)
+      : [],
+    history: Array.isArray(history)
+      ? history.map(autoCheckinRunFrom).filter((run): run is ChannelAutoCheckinRun => run !== undefined)
+      : [],
   }
+}
+
+/**
+ * Force one batch claim across every channel with an account.
+ *
+ * The scheduled pass refuses to run twice on the same day, so an account that
+ * failed at 09:00 could not be retried from the UI at all. This asks the pack
+ * for `usage.autoCheckin { run: true }`, which skips only that gate. Repeating
+ * a claim is safe: already-collected accounts come back as `already-claimed`.
+ *
+ * Returns the FRESH state (details + history) so the dialog can repaint in one
+ * round trip. The caller owns the "running" state; the pack's reply is awaited.
+ */
+export async function runAutoCheckin(): Promise<ChannelAutoCheckin | undefined> {
+  const envelope = await callPack('usage.autoCheckin', { run: true })
+  return autoCheckinFrom(envelope)
 }
 
 /**

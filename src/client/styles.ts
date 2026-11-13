@@ -426,6 +426,9 @@ export const POOL_CARD_CSS = `
    model always visible, and keeping the old names on the new shapes would
    leave two rule sets fighting over one element. */
 .dsm-xdpool-cpool{display:flex;flex-direction:column;gap:10px}
+/* Page-level action: reload the state file. It exists because the pack caches
+   the account list for the life of the process. */
+.dsm-xdpool-cpool-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .dsm-xdpool-cpool-grid{display:flex;flex-direction:column;gap:12px;min-width:0}
 .dsm-xdpool-cpool-card{--dsm-xdpool-cpool-accent:var(--dsw-alias-brand-primary,#5686fe);position:relative;display:flex;flex-direction:column;gap:8px;padding:12px 13px 12px 15px;overflow:hidden;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:13px;background:color-mix(in srgb, var(--dsw-alias-bg-layer-3,#2a2c33) 80%, transparent);box-shadow:inset 0 1px 0 rgb(255 255 255 / 6%), 0 1px 2px rgb(0 0 0 / 6%);transition:transform .22s cubic-bezier(.32,.72,0,1),box-shadow .24s ease,border-color .2s ease}
 .dsm-xdpool-cpool-card:hover{transform:translateY(-3px);border-color:color-mix(in srgb, var(--dsm-xdpool-cpool-accent,#5686fe) 55%, var(--dsw-alias-border-l2,#36373b));box-shadow:inset 0 1px 0 rgb(255 255 255 / 8%),0 18px 40px rgb(0 0 0 / 15%)}
@@ -844,6 +847,10 @@ export const CHANNEL_CARD_CSS = `
    shared switch so it reads as the same control family as the aggregate page. */
 .dsm-xdpool-autocheckin{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:9px 12px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:11px;background:color-mix(in srgb, var(--dsw-alias-bg-layer-3,#2a2c33) 60%, transparent)}
 .dsm-xdpool-autocheckin-note{font-size:11px;line-height:17px;color:var(--dsw-alias-label-tertiary,#8a90a0);min-width:0}
+/* The details trigger is pushed to the far end of the flex row. A summary line
+   is an aggregate; this button is the only way to see WHICH account failed. */
+.dsm-xdpool-autocheckin-details{margin-left:auto;padding:4px 10px;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary,#b6bbc8);font-size:11px;line-height:17px;cursor:pointer;white-space:nowrap}
+.dsm-xdpool-autocheckin-details:hover{border-color:var(--dsw-alias-state-business-primary,#5686fe);color:var(--dsw-alias-label-primary,#e8eaf0)}
 /* Advice that belongs beside a button rather than in a card body. */
 .dsm-xdpool-channel-hint{font-size:11px;line-height:17px;color:var(--dsw-alias-label-tertiary,#8a90a0)}
 .dsm-xdpool-channel-waiting{color:var(--dsw-alias-state-business-primary,#5686fe);font-size:11px;line-height:17px}

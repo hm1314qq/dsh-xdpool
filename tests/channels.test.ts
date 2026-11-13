@@ -77,6 +77,10 @@ describe('channel route contract', () => {
       'account.delete',
       'account.list',
       'account.refresh',
+      // Re-read state.json into the running instance. Needed because the pack
+      // caches the account list for the life of the process; before this, a
+      // hand edit required a full host restart.
+      'account.reload',
       'account.test',
       'account.update',
       // Whole-pool credential backup. `backup.import` REPLACES rather than merges, and

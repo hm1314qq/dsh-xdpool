@@ -18,9 +18,10 @@ import {
   type PoolWebChannelsStatus,
 } from '../status-paths.ts'
 import type { ChannelAccount, ChannelRpcEnvelope } from '../channels.ts'
-import { accountsFrom, autoCheckinFrom, callPack, createdFrom, fetchChannels, pollFrom, providerStatusesFrom, type ChannelAutoCheckin } from './channel-rpc.ts'
+import { accountsFrom, autoCheckinFrom, callPack, createdFrom, fetchChannels, pollFrom, providerStatusesFrom, runAutoCheckin, type ChannelAutoCheckin } from './channel-rpc.ts'
 import type { XdPoolSettingsKey } from './locales.ts'
 import { CHANNEL_CARD_CSS } from './styles.ts'
+import { AutoCheckinDetailsDialog } from './AutoCheckinDetails.tsx'
 import { BrandTile } from './brand-tile.tsx'
 import { channelIcon, channelInitials } from './channel-icons.ts'
 import { PageHero } from './shell.tsx'
@@ -276,6 +277,38 @@ export function ChannelsPage({ t }: ChannelsPageProps) {
    */
   const [autoCheckin, setAutoCheckin] = useState<ChannelAutoCheckin | undefined>(undefined)
   const [autoBusy, setAutoBusy] = useState(false)
+  /** The claim-details dialog. Local: nothing outside this page needs it. */
+  const [autoDetailsOpen, setAutoDetailsOpen] = useState(false)
+  /** True while a manually forced batch claim is in flight. */
+  const [autoRunning, setAutoRunning] = useState(false)
+  /**
+   * Force one claim pass across all channels. The scheduled run refuses a
+   * second pass on the same day, so this is the only way to retry an account
+   * that failed this morning. The pack awaits the pass and returns the fresh
+   * state (details + history), so one round trip repaints the dialog.
+   */
+  const runNow = useCallback(async (): Promise<void> => {
+    setAutoRunning(true)
+    try {
+      const next = await runAutoCheckin()
+      if (!mounted.current) return
+      /**
+       * An error envelope is NOT a throw: `runAutoCheckin` shapes the pack's
+       * `{ok:false}` reply into `undefined`, and swallowing it here left the
+       * dialog repainting stale data with no word of why. Surface it the same
+       * way a thrown failure would be.
+       */
+      if (next === undefined) {
+        setError('auto-checkin run failed')
+        return
+      }
+      setAutoCheckin(next)
+    } catch (cause) {
+      if (mounted.current) setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      if (mounted.current) setAutoRunning(false)
+    }
+  }, [])
   const loadAutoCheckin = useCallback(async (): Promise<void> => {
     try {
       const envelope = await callPack('usage.autoCheckin', {})
@@ -287,6 +320,16 @@ export function ChannelsPage({ t }: ChannelsPageProps) {
     }
   }, [])
   useEffect(() => { void loadAutoCheckin() }, [loadAutoCheckin])
+  /**
+   * Refresh the ledger EVERY time the dialog opens, not just at page mount.
+   * The page can sit open for hours while a scheduled pass lands; opening the
+   * dialog is the moment the reader actually cares, so that is when the data
+   * must be current. A stale snapshot was the reported "弹框里没有详情内容".
+   */
+  const openDetails = useCallback(async (): Promise<void> => {
+    setAutoDetailsOpen(true)
+    await loadAutoCheckin()
+  }, [loadAutoCheckin])
   const toggleAutoCheckin = useCallback(async (): Promise<void> => {
     const next = autoCheckin?.enabled === true ? false : true
     setAutoBusy(true)
@@ -335,6 +378,20 @@ export function ChannelsPage({ t }: ChannelsPageProps) {
           {autoCheckin.lastResult !== undefined && (
             <span className="dsm-xdpool-autocheckin-note">{autoCheckin.lastResult}</span>
           )}
+          {/*
+            The summary line is an aggregate ("2 failed"), so it can never say
+            WHICH account failed or WHY. The dialog answers that from the
+            per-account breakdown the pack now persists. Always rendered — a
+            run that recorded nothing still gets an explanation, not a button
+            that opens a blank box.
+          */}
+          <button
+            type="button"
+            className="dsm-xdpool-autocheckin-details"
+            onClick={() => { void openDetails() }}
+          >
+            {t?.('chan.autoDetails') ?? 'Claim details'}
+          </button>
         </div>
       )}
       {error !== undefined && (
@@ -374,6 +431,21 @@ export function ChannelsPage({ t }: ChannelsPageProps) {
           onCancel={() => cancel(channel.id)}
         />
       ))}
+      {autoDetailsOpen && autoCheckin !== undefined && (
+        <AutoCheckinDetailsDialog
+          rows={autoCheckin.details}
+          history={autoCheckin.history}
+          lastAt={autoCheckin.lastAt}
+          running={autoRunning || autoCheckin.running}
+          // The ledger reads "Qoder 中国版 · 就这我是真的不会", not "qodercn · …":
+          // provider ids are machine keys, display names are what the rest of
+          // this page already uses.
+          names={Object.fromEntries(channels.map(channel => [channel.id, channel.name]))}
+          t={t}
+          onClose={() => { setAutoDetailsOpen(false) }}
+          onRunNow={() => { void runNow() }}
+        />
+      )}
     </div>
   )
 }
