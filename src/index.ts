@@ -6,6 +6,36 @@
  * @module dsh-xdpool/index
  */
 import { creditReservesWith } from './credit-reserve.ts'
+import { createDoubaoLlm, DOUBAO_CHANNEL as DOUBAO_LANE_CHANNEL } from './doubao-llm.ts'
+import { registerDoubaoRoutes } from './doubao-routes.ts'
+import { createDoubaoAutomation } from './doubao-automation.ts'
+import { isUsageStrategy, readChannelUsage, writeChannelUsage } from './channel-usage.ts'
+import { DoubaoHostAdapter, DOUBAO_PROVIDER_ID } from './doubao-host-adapter.ts'
+import { MarvisHostAdapter, MARVIS_PROVIDER_ID } from './marvis-host-adapter.ts'
+import { registerMarvisRoutes } from './marvis-routes.ts'
+import { AstudioHostAdapter, ASTUDIO_PROVIDER_ID } from './astudio-host-adapter.ts'
+import { registerAstudioRoutes } from './astudio-routes.ts'
+import { defaultAstudioAccount } from './astudio-store.ts'
+import { AccioHostAdapter, ACCIO_PROVIDER_ID } from './accio-host-adapter.ts'
+import { registerAccioRoutes } from './accio-routes.ts'
+import { defaultAccioCredential } from './accio-store.ts'
+import { MonkeycodeHostAdapter } from './monkeycode-host-adapter.ts'
+import { registerMonkeycodeRoutes } from './monkeycode-routes.ts'
+import { monkeycodeCredentialFor } from './monkeycode-store.ts'
+import { MONKEYCODE_CN, MONKEYCODE_INTL } from './monkeycode-protocol.ts'
+import { BaizhiHostAdapter, BAIZHI_PROVIDER_ID } from './baizhi-host-adapter.ts'
+import { registerBaizhiRoutes } from './baizhi-routes.ts'
+import { defaultBaizhiCredential } from './baizhi-store.ts'
+import { AutoclawHostAdapter } from './autoclaw-host-adapter.ts'
+import { registerAutoclawRoutes } from './autoclaw-routes.ts'
+import { registerMagicrewRoutes } from './magicrew-routes.ts'
+import { autoclawCredentialFor } from './autoclaw-store.ts'
+import { AUTOCLAW_CN, AUTOCLAW_INTL } from './autoclaw-protocol.ts'
+import { defaultMarvisAccount, readMarvisAccounts } from './marvis-store.ts'
+import { DOUBAO_MODELS } from './doubao-catalog.ts'
+import { readStoredSession, removeStoredSession, writeStoredSession } from './doubao-store.ts'
+import { setDoubaoSession } from './doubao-upstream.ts'
+import type { DoubaoSession } from './doubao-auth.ts'
 import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
@@ -245,6 +275,7 @@ import {
   unignoreAccount,
 } from './ignored.ts'
 import { adoptLegacyDataDir, describeProviderIdRename } from './migrate.ts'
+import { runCompatMigrations } from './compat-migrate.ts'
 import { fileURLToPath } from 'node:url'
 /**
  * This plugin's install root, the tree its own provider is assembled from.
@@ -350,6 +381,15 @@ export const inject = ['llm', 'settings']
  * the mechanism the single-account connector uses.
  */
 export const XDPOOL_SETTINGS_NS = 'xdpool' as SettingsNamespace
+
+/**
+ * Where the own-channel adapter refresher is published.
+ *
+ * The route registrations happen before the adapters exist, so a module-level slot is the only
+ * place both halves can agree on. It is reset each `apply`, so two mounts in one process cannot
+ * call a disposed handle.
+ */
+const ownAdapterRefresherSlot: { current: (() => void) | undefined } = { current: undefined }
 /** Plugin configuration. */
 export interface Config {
   /** Explicit WorkBuddy desktop auth-file path override. */
@@ -377,6 +417,13 @@ export interface Config {
    * Absent reads as `priority`.
    */
   distribution?: 'priority' | 'round-robin' | 'balanced' | 'sticky' | 'expiry'
+  /**
+   * Per-channel usage order, overriding `distribution` for that channel alone.
+   *
+   * A channel with no entry follows `distribution`, so an install that never opened the channel
+   * page behaves exactly as before.
+   */
+  channelDistribution?: Readonly<Record<string, 'priority' | 'round-robin' | 'balanced' | 'sticky' | 'expiry'>>
   /**
    * Account ids switched off on the card. A disabled account is never picked
    * to serve a request, but it stays in the pool and on the card so it can be
@@ -607,6 +654,18 @@ export const Config: z<Config> = z.object({
   authFile: asVolatile(z.string().description('WorkBuddy desktop auth file (defaults to the app own location)')),
   cooldownMs: asVolatile(z.number().step(1).min(1000).default(60000).description('Rate-limit cooldown per account, in milliseconds')),
   distribution: asVolatile(z.union(['priority', 'round-robin', 'balanced', 'sticky', 'expiry']).default('priority').description('How requests are spread: priority (drain one), round-robin (in order), balanced (idle-weighted random), sticky (one account per conversation, new conversations rotate), or expiry (spend the account whose credit packs expire soonest)')),
+  /**
+   * Per-channel usage order, overriding `distribution` for that channel alone.
+   *
+   * The pool-wide setting is right for the two WorkBuddy lanes, where the accounts are one
+   * vendor's and one strategy suits them all. It is wrong for a channel with two or three
+   * accounts of its own: draining one CodeArts account first is a different decision from
+   * draining one WorkBuddy account first, and until now there was no way to say so.
+   *
+   * A channel with no entry uses `distribution`, so nothing changes for anyone who does not set
+   * one — the same shape `creditReserves` uses for per-account overrides.
+   */
+  channelDistribution: asVolatile(z.dict(z.union(['priority', 'round-robin', 'balanced', 'sticky', 'expiry'])).default({}).description('Per-channel usage order; a channel with no entry follows the pool-wide setting')),
   disabledAccountIds: asVolatile(z.array(z.string()).default([]).description('Account ids excluded from the pool (empty = every discovered account participates)')),
   creditReserves: asVolatile(z.dict(z.number().step(1).min(0)).default({}).description('Per-account credit floor: stop using an account once its balance reaches this value')),
   enabledModelIds: asVolatile(z.array(z.string()).default([]).description('Legacy shared model-id list; used by a region that has no per-region selection yet')),
@@ -731,6 +790,8 @@ let freeLaneSwitch: (enabled: boolean) => void = () => {}
  * because its models read the shim origin at construction time.
  */
 export function apply(ctx: Context, config: Config = {}): void {
+  // A fresh mount must not call the previous mount's disposed handles.
+  ownAdapterRefresherSlot.current = undefined
   const core = createCore(ctx.logger)
   // Cross-generation guard, checked ONCE at load.
   //
@@ -764,6 +825,13 @@ export function apply(ctx: Context, config: Config = {}): void {
   } else if (migration.skipped === 'failed') {
     recordStartupNote(`could not adopt pre-rename state into ${migration.to}; continuing with current data`)
   }
+  // 2.7.x 老数据的兼容迁移（src/compat-migrate.ts）：目前是把豆包的单会话文件落盘成多账号
+  // 格式，旧文件原样保留。异步、尽力而为、永不抛错 —— 读豆包账号的一侧本来就会合并旧文件，
+  // 所以这一步晚几毫秒完成也不会让任何账号「暂时消失」。
+  void runCompatMigrations().then(
+    notes => { for (const note of notes) recordStartupNote(note) },
+    () => { /* runCompatMigrations never rejects; this is belt and braces */ },
+  )
   // The permanent ignore list, read ONCE here (synchronously) and kept live.
   //
   // Loaded at apply time rather than on the first scan because `apply()` is
@@ -1175,9 +1243,24 @@ function canonicalJson(value: unknown): string {
   // is handed the CN roster: without it a chain pointing at `hy3` would drop
   // that member and advertise only the aggregate half. The CN rows are the
   // ones the CN shim can actually serve, which is where chains are answered.
+  /**
+   * The channel lane, read lazily by the catalog below.
+   *
+   * The lane is created a few dozen lines further down and needs the catalog's siblings to be
+   * built first, so the dependency runs the other way. A getter closes the loop without moving
+   * either: the callback only runs when the catalog refreshes, which is after both exist.
+   */
+  let channelLaneForChains: { rows: () => Promise<readonly { id: string; channel: string; modelId: string; name: string }[]> } | undefined
   const aggregateCatalog = new AggregateCatalog(
     () => readAggregateSettingsSync(),
     () => core.catalogs.cn.current(),
+    /**
+     * The channel rows a chain member may name — issue #177.
+     *
+     * Empty until the lane exists, which is only during the first synchronous stretch of
+     * `apply`. The first refresh happens after that, and the lane caches its own rows.
+     */
+    async () => (channelLaneForChains === undefined ? [] : await channelLaneForChains.rows()),
   )
   void aggregateCatalog.refresh()
   // The免密 free lane. It owns its own roster behind its own provider id, so it
@@ -1205,8 +1288,84 @@ function canonicalJson(value: unknown): string {
    * would offer the same models twice under two routes — and `buddy:` is already
    * the prefix the pool lane's own rows carry.
    */
+  /**
+   * The llm face the channel lane talks to, with Doubao served from here.
+   *
+   * `ctx.llm` owns every pack channel; Doubao has no pack adapter, so the two methods the
+   * lane needs are answered by this plugin for `doubao` and handed straight through for
+   * everything else. Composing rather than replacing keeps the host's registry authoritative
+   * for the channels it owns, which is what lets a channel the pack adds later appear without
+   * this file being touched.
+   */
+  /**
+   * The Doubao session, held in memory for the requests that read it.
+   *
+   * A module-scope-like holder rather than a local, because the lane and the routes are
+   * registered once and must see the CURRENT session — which changes the moment a sign-in
+   * lands. Restoring it from disk is what makes a restart keep the lane working.
+   */
+  /**
+   * The Doubao session.
+   *
+   * `undefined` until a sign-in lands or the stored one is restored. The lane reads it per
+   * call, so a sign-in that happens after startup is visible on the next request without a
+   * restart — and a rejection shows the "sign in again" sentence rather than an empty list.
+   */
+  let doubaoSession: DoubaoSession | undefined
+
+  /** Point every reader at a session: the lane, and the upstream's own holder. */
+  const adoptDoubaoSession = (session: DoubaoSession | undefined): void => {
+    doubaoSession = session
+    setDoubaoSession(session)
+  }
+
+  /**
+   * Restore the session written by an earlier run.
+   *
+   * Deliberately at apply time and deliberately not awaited: the plugin must not block its
+   * own start on a disk read, and a missing file is the ordinary "not signed in" state rather
+   * than a failure. `adoptDoubaoSession` publishes it as soon as it arrives, which is before
+   * any request can arrive.
+   */
+  void readStoredSession().then((stored) => {
+    if (stored !== undefined) adoptDoubaoSession(stored)
+  })
+
+  const doubaoLlm = createDoubaoLlm({
+    session: () => doubaoSession,
+  })
+
+  /**
+   * Doubao's credit automation.
+   *
+   * Created beside the lane because both read the same session: a sign-in that lands while the
+   * automation is armed must be picked up on the next pass without anything being re-wired.
+   */
+  const doubaoAutomation = createDoubaoAutomation({
+    session: () => doubaoSession,
+    logger: ctx.logger,
+  })
+  /** The ids Doubao's catalogue knows, so `stream` can tell its models from the host's. */
+  const doubaoModelIds = new Set(DOUBAO_MODELS.map(model => model.id))
+  const hostLlm = ctx.llm as unknown as ChannelLaneLlm
+  const channelLlm: ChannelLaneLlm = {
+    listModels: async (provider: string) =>
+      provider === DOUBAO_LANE_CHANNEL ? doubaoLlm.listModels(provider) : hostLlm.listModels(provider),
+    stream: (options: Record<string, unknown>) => (async function* (): AsyncIterable<Record<string, unknown>> {
+      // The lane resolves `doubao:<model>` to the bare model id before calling `stream`, so
+      // the id alone says which implementation answers: Doubao's catalogue is the only one
+      // that knows these keys.
+      const modelId = typeof options['model'] === 'string' ? options['model'] : ''
+      const isDoubao = doubaoModelIds.has(modelId)
+      if (isDoubao) {
+        yield* doubaoLlm.stream(options) as AsyncIterable<Record<string, unknown>>
+        return
+      }
+      yield* hostLlm.stream(options)
+    })(),
+  }
   const channelLane = createChannelLane({
-    llm: ctx.llm as unknown as ChannelLaneLlm,
+    llm: channelLlm,
     providers: () => REGISTERED_CHANNELS
       .map(channel => channel.id)
       .filter(id => channelListableAsRows(id, POOL_OWNED_CHANNELS)),
@@ -1229,7 +1388,14 @@ function canonicalJson(value: unknown): string {
    * `relaySettingsOf` is what preserves that, since the relay's own settings
    * object has no reason to carry a list it never consults.
    */
-  const lanModelsOf = (): readonly string[] | undefined => readAggregateSettingsSync().relay?.models
+  /*
+    「按账号池启用列表」时不限制（返回 undefined = 全放行账号池启用的模型），
+    「自定义」时只放行存下的列表。旧配置没有 modelsMode，按原来的规则走 models。
+  */
+  const lanModelsOf = (): readonly string[] | undefined => {
+    const saved = readAggregateSettingsSync().relay
+    return saved?.modelsMode === 'pool' ? undefined : saved?.models
+  }
   /**
    * The login channels' models, as the route editor needs them.
    *
@@ -1282,6 +1448,14 @@ function canonicalJson(value: unknown): string {
       // own. It is also the shim the LAN relay forwards to, which makes this the
       // one place those models become reachable over OpenAI wire.
       channels: channelLane,
+      /**
+       * The same rows, for chain resolution (#177).
+       *
+       * `channels` lets a request reach a channel model; `hostRows` lets a CHAIN MEMBER name
+       * one. Without the second, a chain of only channel members resolved to zero members and
+       * the executor answered `combo_missing` for a chain the routing page showed as valid.
+       */
+      hostRows: () => channelLane.rows(),
       // The card's Gateway checkboxes. Enforced only on relay-originated
       // requests, so DSH's own picker is never narrowed by a list meant for
       // other machines.
@@ -1323,6 +1497,9 @@ function canonicalJson(value: unknown): string {
     // The scheduler holds a timer; stop it before the shims so a tick in flight
     // cannot reach an upstream client whose base has already gone.
     core.scheduler.stop()
+    // Same reason: the Doubao automation holds a timer, and a pass filing a claim after the
+    // plugin is gone would report into nothing.
+    doubaoAutomation.stop()
   })
   void relay.ready.catch((error: unknown) => {
     ctx.logger.warn(`xdpool relay: startup failed — ${String(error)}`)
@@ -1338,6 +1515,10 @@ function canonicalJson(value: unknown): string {
     status: () => relay.status(),
     shared: () => readAggregateSettingsSync().relay?.models,
     roster: () => shim.roster(),
+    mode: () => {
+      const saved = readAggregateSettingsSync().relay
+      return saved?.modelsMode ?? (saved?.models === undefined ? 'pool' : 'custom')
+    },
     warn: error => ctx.logger.warn('dsh-xdpool: gateway roster failed', error),
   })
   /**
@@ -1410,8 +1591,106 @@ function canonicalJson(value: unknown): string {
   // Same-origin routes backing the XD Pool settings card. `webServer`
   // is an optional service: on a headless profile without it, no card routes
   // mount and the card shows an offline banner — the provider still works.
-  ctx.inject(['webServer'], (webCtx) => registerPoolStatusRoute(webCtx, {
+  /**
+   * The authorities this deployment serves, read per request.
+   *
+   * `connection.trustedHosts` is what the host's own `/api` bridge trusts — Tailscale serve, a
+   * LAN hostname, a reverse proxy. The plugin's routes used to accept loopback only, so behind
+   * any of those the card displayed its data and refused every button (#164). Reading it fresh
+   * means a configuration change reaches the next request without a restart.
+   *
+   * A missing service is not an error: it simply means nothing beyond loopback is trusted, which
+   * is the desktop default.
+   */
+  const trustedHosts = (): readonly string[] => {
+    try {
+      const connection = (ctx as { connection?: { config?: { trustedHosts?: unknown } } }).connection
+      const list = connection?.config?.trustedHosts
+      if (!Array.isArray(list)) return []
+      return list.filter((entry): entry is string => typeof entry === 'string')
+    } catch {
+      return []
+    }
+  }
+
+  ctx.inject(['webServer'], (webCtx) => {
+    /**
+     * Doubao's three routes.
+     *
+     * Its own lane, so its own endpoints: the sign-in harvests a cookie jar from a browser
+     * this process starts, and the quota reads the windows the account holds. Neither is
+     * something the pack can answer for a vendor it has no adapter for.
+     */
+    /**
+     * Marvis's four routes: session, browser sign-in, paste, wallet.
+     *
+     * `adopted` re-reads the store so the adapter's next `listModels` sees a fresh sign-in — the
+     * adapter reads the account per call, so nothing else has to be rebuilt.
+     */
+    /**
+     * AStudio's four routes: session, paste, wallet, check-in.
+     */
+    /**
+     * Set once the adapters are registered; every channel route calls it after a sign-in.
+     *
+     * A closure rather than a direct reference because the routes are mounted before the
+     * adapters exist, and the value they need is only known afterwards.
+     */
+    registerAstudioRoutes(webCtx, { adopted: () => { ownAdapterRefresherSlot.current?.() }, trustedHosts })
+    registerAccioRoutes(webCtx, { adopted: () => { ownAdapterRefresherSlot.current?.() }, trustedHosts })
+    registerMonkeycodeRoutes(webCtx, { adopted: () => { ownAdapterRefresherSlot.current?.() }, trustedHosts })
+    registerBaizhiRoutes(webCtx, { adopted: () => { ownAdapterRefresherSlot.current?.() }, trustedHosts })
+    registerAutoclawRoutes(webCtx, { adopted: () => { ownAdapterRefresherSlot.current?.() }, trustedHosts })
+    registerMagicrewRoutes(webCtx, { adopted: () => { ownAdapterRefresherSlot.current?.() }, trustedHosts })
+    registerMarvisRoutes(webCtx, {
+      accounts: async () => (await readMarvisAccounts()).map(account => ({
+        openid: account.openid,
+        ...(account.nickname === undefined ? {} : { nickname: account.nickname }),
+        loginType: account.loginType,
+      })),
+      adopted: () => {},
+      trustedHosts,
+    })
+    registerDoubaoRoutes(webCtx, {
+      session: () => doubaoSession,
+      trustedHosts,
+      save: (session) => {
+        adoptDoubaoSession(session)
+        void writeStoredSession(session)
+      },
+      clear: () => {
+        adoptDoubaoSession(undefined)
+        void removeStoredSession()
+      },
+      automation: () => doubaoAutomation,
+    })
+    return registerPoolStatusRoute(webCtx, {
     pool: core.pool,
+    trustedHosts,
+    /**
+     * The usage order each channel actually uses.
+     *
+     * A channel with an override reports it; one without reports the pool-wide value, because
+     * that IS what it uses — the card shows the effective decision, not just the stored one.
+     */
+    /**
+     * The usage order each channel actually uses.
+     *
+     * The per-channel overrides live in the plugin's own state file rather than in the host's
+     * settings document: the host's write path for a plugin's section accepts only its own
+     * `{auto}` toggle, so a settings write from here would need a service this build may not
+     * publish. A file the plugin already owns is the same mechanism `accounts.json` uses, and
+     * the effective value is computed the same way either way.
+     */
+    channelUsage: () => ({
+      pool: config.distribution ?? 'priority',
+      channels: readChannelUsage(),
+    }),
+    setChannelUsage: async (channel: string, strategy: string | undefined) => {
+      // Validated at the boundary: this is the one write path a caller controls, and an unknown
+      // strategy would be stored and then silently fall back at request time.
+      writeChannelUsage(channel, isUsageStrategy(strategy) ? strategy : undefined)
+    },
     catalogs: core.catalogs,
     client: core.client,
     // The usage panel reads the SAME recorder both shims write to, so its totals
@@ -1793,6 +2072,7 @@ function canonicalJson(value: unknown): string {
         // Passed through as written: an empty array is "share nothing", a
         // decision, not an absence. The store trims and de-duplicates on the way in.
         ...(patch.models === undefined ? {} : { models: patch.models }),
+        ...(patch.modelsMode === undefined ? {} : { modelsMode: patch.modelsMode }),
       }
       await writeRelaySetting(wanted)
       // Re-evaluate the listener from what was actually persisted, not from the
@@ -1805,7 +2085,8 @@ function canonicalJson(value: unknown): string {
       // the share list itself.
       return relayDocument()
     },
-  }))
+    })
+  })
   api = {
     ...core,
     shim,
@@ -1954,6 +2235,21 @@ function canonicalJson(value: unknown): string {
         let releaseAdapterGlobal: AdapterHandle | undefined
         let releaseAdapterAggregate: AdapterHandle | undefined
         let releaseAdapterFree: AdapterHandle | undefined
+        let releaseAdapterDoubao: AdapterHandle | undefined
+        let releaseAdapterMarvis: AdapterHandle | undefined
+        /**
+         * The channels this plugin serves itself.
+         *
+         * Declared in the SAME scope that registers them, so the disposers are reachable from
+         * both the registration block and the sign-in refresh.
+         */
+        let releaseAdapterAstudio: AdapterHandle | undefined
+        let releaseAdapterAccio: AdapterHandle | undefined
+        let releaseAdapterMonkeycode: AdapterHandle | undefined
+        let releaseAdapterMonkeycodeIntl: AdapterHandle | undefined
+        let releaseAdapterBaizhi: AdapterHandle | undefined
+        let releaseAdapterAutoclaw: AdapterHandle | undefined
+        let releaseAdapterAutoclawCn: AdapterHandle | undefined
         let releaseDirectory: (() => void) | undefined
         // Adapters first, in a try of their own, and ONLY THEN the directory.
         //
@@ -1967,6 +2263,20 @@ function canonicalJson(value: unknown): string {
         // directory rejection now costs the settings entry alone and the models
         // keep being served.
         try {
+          /**
+           * BOTH registrations stay — the de-duplication has to be done the other way (2.7.7).
+           *
+           * 2.7.2 dropped these two to remove the duplicate picker groups, on the theory that the
+           * scan-login lanes (`buddy` / `workbuddy`) served the same accounts. They do not: those
+           * lanes read the PACK's account pool, which is empty unless the user signed in through
+           * the channel card. An account that arrived by reading the desktop client lives only in
+           * this plugin's pool, so removing these registrations made its models vanish entirely
+           * — the picker showed the pack's hard-coded fallback rows, or nothing at all.
+           *
+           * The duplicate-group problem is real, and it is fixed in `channelListableAsRows`: the
+           * pack lanes are hidden from OUR model listings instead, so the picker groups come from
+           * the registrations that actually hold the accounts.
+           */
           releaseAdapterCn = ctx.llm.registerAdapter(
             [POOL_PROVIDER_BY_REGION.cn],
             adaptersByRegion.cn.adapter,
@@ -1988,6 +2298,99 @@ function canonicalJson(value: unknown): string {
             [XDPOOL_FREE_PROVIDER],
             adaptersByRegion.free.adapter,
           )
+          /**
+           * Doubao, registered the same way every other channel is.
+           *
+           * The lane over HTTP is not enough: the model PICKER reads the host's adapter
+           * registry, so a signed-in Doubao account with ten models enabled appeared nowhere in
+           * the list. This is the registration the pack performs for each of its own channels.
+           */
+          releaseAdapterDoubao = ctx.llm.registerAdapter(
+            [DOUBAO_PROVIDER_ID],
+            new DoubaoHostAdapter({ session: () => doubaoSession }),
+          )
+          /**
+           * Marvis, the fifteenth channel.
+           *
+           * Its account is an OAuth session rather than a cookie jar, and the gateway wants a
+           * device fingerprint on every request — neither fits the pack's generic flow, so it is
+           * served here like Doubao is.
+           */
+          releaseAdapterMarvis = ctx.llm.registerAdapter(
+            [MARVIS_PROVIDER_ID],
+            new MarvisHostAdapter({ account: () => defaultMarvisAccount() }),
+          )
+          /**
+           * AStudio, the sixteenth channel.
+           *
+           * Its gateway address and api_key both travel with the credentials, which is why the
+           * adapter resolves an endpoint per call instead of holding a base URL.
+           */
+          releaseAdapterAstudio = ctx.llm.registerAdapter(
+            [ASTUDIO_PROVIDER_ID],
+            new AstudioHostAdapter({ account: () => defaultAstudioAccount() }),
+          )
+          /**
+           * Accio, the nineteenth channel.
+           *
+           * Its wire is Gemini-shaped with the token in the body, so it has its own adapter
+           * rather than sharing the OpenAI-shaped one.
+           */
+          releaseAdapterAccio = ctx.llm.registerAdapter(
+            [ACCIO_PROVIDER_ID],
+            new AccioHostAdapter({ credential: () => defaultAccioCredential() }),
+          )
+          /** MonkeyCode, both sites: an Anthropic-shaped gateway behind a session cookie. */
+          releaseAdapterMonkeycode = ctx.llm.registerAdapter(
+            [MONKEYCODE_CN.id],
+            new MonkeycodeHostAdapter({ site: MONKEYCODE_CN, credential: () => monkeycodeCredentialFor(MONKEYCODE_CN.id) }),
+          )
+          releaseAdapterMonkeycodeIntl = ctx.llm.registerAdapter(
+            [MONKEYCODE_INTL.id],
+            new MonkeycodeHostAdapter({ site: MONKEYCODE_INTL, credential: () => monkeycodeCredentialFor(MONKEYCODE_INTL.id) }),
+          )
+          /** 百智云, the twenty-third channel: Anthropic wire, daily credit behind a PoW. */
+          releaseAdapterBaizhi = ctx.llm.registerAdapter(
+            [BAIZHI_PROVIDER_ID],
+            new BaizhiHostAdapter({ credential: () => defaultBaizhiCredential() }),
+          )
+          /** AutoClaw, both sites: a signed gateway with a five-bucket wallet. */
+          releaseAdapterAutoclaw = ctx.llm.registerAdapter(
+            [AUTOCLAW_INTL.id],
+            new AutoclawHostAdapter({ site: AUTOCLAW_INTL, credential: () => autoclawCredentialFor(AUTOCLAW_INTL.id) }),
+          )
+          releaseAdapterAutoclawCn = ctx.llm.registerAdapter(
+            [AUTOCLAW_CN.id],
+            new AutoclawHostAdapter({ site: AUTOCLAW_CN, credential: () => autoclawCredentialFor(AUTOCLAW_CN.id) }),
+          )
+          /**
+           * A sign-in must reach the picker without a restart.
+           *
+           * These adapters re-read their store on every `listModels`, but the HOST caches the
+           * model list per provider and only rebuilds it when the route set is re-committed.
+           * Calling `replace` with the unchanged id is the documented way to say "this route is
+           * served by a rebuilt adapter" — it publishes `llm/adapters-updated`, which is what
+           * refreshes every open view. Without it a freshly signed-in channel stays invisible
+           * until DSH restarts, which is exactly the complaint that started this whole batch.
+           */
+          const refreshOwnAdapters = (): void => {
+            for (const [handle, route] of [
+              [releaseAdapterAstudio, ASTUDIO_PROVIDER_ID],
+              [releaseAdapterBaizhi, BAIZHI_PROVIDER_ID],
+              [releaseAdapterAccio, ACCIO_PROVIDER_ID],
+              [releaseAdapterMonkeycode, MONKEYCODE_CN.id],
+              [releaseAdapterMonkeycodeIntl, MONKEYCODE_INTL.id],
+              [releaseAdapterAutoclaw, AUTOCLAW_INTL.id],
+              [releaseAdapterAutoclawCn, AUTOCLAW_CN.id],
+            ] as const) {
+              if (handle === undefined) continue
+              try {
+                handle.replace([route])
+              } catch {
+                // A disposed handle answers here; the next mount re-registers it.
+              }
+            }
+          }
         } catch (error: unknown) {
           // An adapter that cannot be created is not survivable — the picker
           // would advertise a provider with nothing behind it — so this is the
@@ -1998,6 +2401,15 @@ function canonicalJson(value: unknown): string {
           releaseAdapterGlobal?.()
           releaseAdapterAggregate?.()
           releaseAdapterFree?.()
+          releaseAdapterDoubao?.()
+          releaseAdapterMarvis?.()
+          releaseAdapterAstudio?.()
+          releaseAdapterAccio?.()
+          releaseAdapterMonkeycode?.()
+          releaseAdapterMonkeycodeIntl?.()
+          releaseAdapterBaizhi?.()
+          releaseAdapterAutoclaw?.()
+          releaseAdapterAutoclawCn?.()
           return
         }
         try {
@@ -2112,6 +2524,9 @@ function canonicalJson(value: unknown): string {
           releaseAdapterGlobal?.()
           releaseAdapterAggregate?.()
           releaseAdapterFree?.()
+          releaseAdapterDoubao?.()
+          releaseAdapterMarvis?.()
+          releaseAdapterAstudio?.()
           releaseDirectory?.()
         }
         try {

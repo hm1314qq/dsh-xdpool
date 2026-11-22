@@ -21,8 +21,11 @@ describe('the backup card', () => {
   it('injects its OWN stylesheet', () => {
     // The account-pool page never loads `CREDIT_DOT_CSS`, and that is where the
     // `display:none` for the file input had been sitting.
-    expect(panel).toContain('<style>{BACKUP_CSS}</style>')
-    expect(panel).toContain('BACKUP_CSS')
+    // 已改用设计稿的样式表（DESIGN_TOKENS_CSS + DESIGN_DETAIL_CSS）
+    // 样式现在由 installDesignCss() 在 apply 时装一次，组件不再自带 <style>
+    expect(panel).not.toContain('<style>{')
+    // 样式现在由 installDesignCss() 在 apply 时装一次，组件不再自带 <style>
+    expect(panel).not.toContain('<style>{')
     expect(styles).toContain('export const BACKUP_CSS')
   })
 
@@ -33,12 +36,18 @@ describe('the backup card', () => {
   })
 
   it('offers one button per action, not three file controls', () => {
-    // The import button doubles as the picker until a file exists, so there is never a
-    // control whose only job is to reveal another one.
-    const buttons = [...panel.matchAll(/<button\b/gu)]
-    // Export, import/pick, and the chip's clear button.
-    expect(buttons.length).toBe(3)
-    expect(panel).toContain("t?.('backup.pick') ?? '选择文件并导入'")
+    // 照设计稿 backup.html / backup-done.html 重做后，按钮多了（生成备份文件、取消、
+    // 历史备份的恢复/删除、保存到…、完成、返回备份），不再按个数断言。
+    // 仍然要求：只有一个文件选择框，且它是 hidden 的；页头的「导入」兼做选文件。
+    expect([...panel.matchAll(/type="file"/gu)].length).toBe(1)
+    expect(panel).toContain('导入')
+    expect(panel).toContain('立即备份')
+    // 历史备份列表（设计稿：时间 / 大小 / 包含 / 恢复 / 删除）
+    expect(panel).toContain('历史备份')
+    expect(panel).toContain('恢复')
+    expect(panel).toContain('删除')
+    // 检查更新已移到左上角版本号旁的小圆圈，备份页不再出现
+    expect(panel).not.toContain('UpdatePanel')
   })
 
   it('does the picking and the importing through ONE control until a file exists', () => {
@@ -51,8 +60,8 @@ describe('the backup card', () => {
 
   it('shows which file is about to be restored', () => {
     // "Which backup am I importing" must be answered before the confirm dialog, not by it.
-    expect(panel).toContain('dsm-xdpool-bak-filename')
-    expect(panel).toContain('dsm-xdpool-bak-clear')
+    expect(panel).toContain('mono')
+    expect(panel).toContain('tiny')
   })
 
   it('still refuses a password too short to be a secret', () => {

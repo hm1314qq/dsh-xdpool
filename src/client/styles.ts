@@ -429,6 +429,7 @@ export const POOL_CARD_CSS = `
 /* Page-level action: reload the state file. It exists because the pack caches
    the account list for the life of the process. */
 .dsm-xdpool-cpool-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dsm-xdpool-cpool-bar{display:flex;justify-content:flex-end;margin:0 0 8px}
 .dsm-xdpool-cpool-grid{display:flex;flex-direction:column;gap:12px;min-width:0}
 .dsm-xdpool-cpool-card{--dsm-xdpool-cpool-accent:var(--dsw-alias-brand-primary,#5686fe);position:relative;display:flex;flex-direction:column;gap:8px;padding:12px 13px 12px 15px;overflow:hidden;border:1px solid var(--dsw-alias-border-l2,#36373b);border-radius:13px;background:color-mix(in srgb, var(--dsw-alias-bg-layer-3,#2a2c33) 80%, transparent);box-shadow:inset 0 1px 0 rgb(255 255 255 / 6%), 0 1px 2px rgb(0 0 0 / 6%);transition:transform .22s cubic-bezier(.32,.72,0,1),box-shadow .24s ease,border-color .2s ease}
 .dsm-xdpool-cpool-card:hover{transform:translateY(-3px);border-color:color-mix(in srgb, var(--dsm-xdpool-cpool-accent,#5686fe) 55%, var(--dsw-alias-border-l2,#36373b));box-shadow:inset 0 1px 0 rgb(255 255 255 / 8%),0 18px 40px rgb(0 0 0 / 15%)}
@@ -484,6 +485,8 @@ export const POOL_CARD_CSS = `
 .dsm-xdpool-cpool-modelname{user-select:none;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsm-xdpool-cpool-tag{font-size:10px;padding:1px 6px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2,#36373b);color:var(--dsw-alias-label-tertiary,#9aa0a8);flex:none}
 .dsm-xdpool-cpool-tag[data-tone=free]{border-color:color-mix(in srgb, #2fbf7f 45%, transparent);color:#2fbf7f}
+/* A paid multiplier: quiet, because it is a fact rather than a warning. */
+.dsm-xdpool-cpool-tag[data-tone=price]{font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary,#c6c9d0)}
 .dsm-xdpool-cpool-tag[data-tone=dead]{border-color:color-mix(in srgb, #e5484d 45%, transparent);color:#ff8a8f}
 /* One line under an empty or fully-filtered list. Both cases print it, because
    "nothing published" and "nothing matched your search" must not look alike. */
@@ -869,6 +872,15 @@ export const CHANNEL_CARD_CSS = `
 
 `.trim()
 
+/*
+  ⚠ 改这里不会生效。
+
+  这份 SHELL_CSS 已经不再注入任何页面 —— 界面用的是 design-css.ts 那一份
+  （从 xdpool-design 原样提取的 114KB）。它被保留下来只因为几个测试拿它
+  当切分锚点（`styles.indexOf('export const SHELL_CSS')`）。
+
+  要改样式请改设计稿源文件，再跑 scripts/extract-design-css.mjs。
+*/
 export const SHELL_CSS = `
 
 .dsm-xdpool-shell{--ease-instrument:cubic-bezier(.16,1,.3,1);--ease-settle:cubic-bezier(.34,1.4,.4,1);--gap:14px;position:relative;display:flex;flex-direction:column;gap:calc(var(--gap)*1.4);max-width:1080px;font-size:13px;line-height:1.55;color:var(--dsw-alias-label-primary,#e8e8ea);-webkit-font-smoothing:antialiased;box-sizing:border-box}
@@ -1631,4 +1643,144 @@ export const BACKUP_CSS = `
 .dsm-xdpool-bak-clear:hover{background:color-mix(in srgb, var(--dsw-alias-label-primary,#e8eaf0) 12%, transparent);color:var(--dsw-alias-label-primary,#e8eaf0)}
 .dsm-xdpool-bak-note{margin:0;font-size:11px;line-height:16px;color:var(--dsw-alias-state-success-primary,#22a06b)}
 .dsm-xdpool-bak-error{margin:0;font-size:11px;line-height:16px;color:var(--dsw-alias-state-error-primary,#e5534b)}
+.dsm-xdpool-update{display:flex;flex-direction:column;gap:8px;margin:0 0 14px;padding:12px 14px;border-radius:12px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l2,#ffffff1f) 82%, transparent);background:color-mix(in srgb, var(--dsw-alias-bg-layer-2,#1c1e22) 60%, transparent)}
+.dsm-xdpool-update-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.dsm-xdpool-update-title{font-size:13px;font-weight:650;color:var(--dsw-alias-label-primary,#e8eaf0)}
+.dsm-xdpool-update-versions{font-size:11.5px;color:var(--dsw-alias-label-tertiary,#8a90a0);font-variant-numeric:tabular-nums}
+.dsm-xdpool-update-versions b{color:var(--dsw-alias-label-secondary,#c6c9d0);font-weight:600}
+.dsm-xdpool-update-sep{margin:0 5px;opacity:.6}
+.dsm-xdpool-update-head .dsm-xdpool-btn{margin-left:auto}
+.dsm-xdpool-update-current{margin:0;font-size:11.5px;line-height:17px;color:var(--dsw-alias-state-success-primary,#22a06b)}
+.dsm-xdpool-update-newer{margin:0;font-size:11.5px;line-height:17px;color:var(--dsw-alias-state-warning-primary,#d99a2b)}
+.dsm-xdpool-update-acts{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.dsm-xdpool-update-hint{font-size:10.5px;line-height:15px;color:var(--dsw-alias-label-tertiary,#8a90a0)}
+.dsm-xdpool-update-error{margin:0;font-size:11.5px;line-height:17px;color:var(--dsw-alias-state-error-primary,#e5534b)}
+`
+
+/* The update check, above the backup controls. Same card treatment as the panels below it, so
+   the page reads as one list of maintenance actions rather than two unrelated blocks. */
+/* 领取详情弹窗（AutoCheckinDetails）的样式。
+   之前这个组件自己 <style> 注入一份，页面级样式表之外又多了一份；
+   统一收到这里，和其余六个页面走同一个注入点。 */
+export const AUTO_LEDGER_CSS = `
+.dsm-xdpool-autodetails-scrim {
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  background: rgba(6, 8, 12, 0.62);
+  backdrop-filter: blur(3px);
+  animation: xd-scrim-in 140ms ease-out;
+}
+.dsm-xdpool-autodetails {
+  width: min(640px, 100%); max-height: min(76vh, 760px);
+  display: flex; flex-direction: column;
+  border-radius: 16px; overflow: hidden;
+  background: var(--dsw-alias-bg-layer-2, #1c1f27);
+  border: 1px solid var(--dsw-alias-border-l2, #323846);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+  color: var(--dsw-alias-label-primary, #e8eaf0);
+  font-size: 13px;
+  animation: xd-ledger-in 160ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+@keyframes xd-scrim-in { from { opacity: 0; } }
+@keyframes xd-ledger-in { from { opacity: 0; transform: translateY(10px) scale(0.985); } }
+@media (prefers-reduced-motion: reduce) {
+  .dsm-xdpool-autodetails-scrim, .dsm-xdpool-autodetails { animation: none; }
+}
+.dsm-xdpool-ledger-head {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2, #323846);
+}
+.dsm-xdpool-ledger-id { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.dsm-xdpool-ledger-eyebrow {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.14em;
+  color: var(--dsw-alias-label-secondary, #98a0b3);
+}
+.dsm-xdpool-ledger-when { font-size: 12px; color: var(--dsw-alias-label-tertiary, #7d8496); }
+.dsm-xdpool-ledger-total {
+  margin-left: auto; display: flex; align-items: baseline; gap: 6px;
+  padding: 4px 12px; border-radius: 10px;
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #48c784) 14%, transparent);
+}
+.dsm-xdpool-ledger-total-num {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 22px; font-weight: 700; line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--dsw-alias-state-success-primary, #48c784);
+}
+.dsm-xdpool-ledger-total-unit { font-size: 11px; color: var(--dsw-alias-state-success-primary, #48c784); opacity: 0.85; }
+.dsm-xdpool-ledger-close {
+  border: 0; background: transparent; color: inherit; cursor: pointer;
+  font-size: 22px; line-height: 1; padding: 0 2px; opacity: 0.65; align-self: flex-start;
+}
+.dsm-xdpool-ledger-close:hover { opacity: 1; }
+.dsm-xdpool-ledger-toolbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 20px; border-bottom: 1px solid var(--dsw-alias-border-l2, #323846);
+}
+.dsm-xdpool-ledger-picker { display: inline-flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--dsw-alias-label-secondary, #98a0b3); }
+.dsm-xdpool-ledger-picker select {
+  max-width: 250px; padding: 4px 9px; border-radius: 7px; font-size: 11.5px;
+  background: var(--dsw-alias-bg-layer-3, #22252e); color: inherit;
+  border: 1px solid var(--dsw-alias-border-l2, #323846);
+}
+.dsm-xdpool-ledger-picker select:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, #5686fe); outline-offset: 1px; }
+.dsm-xdpool-ledger-run {
+  margin-left: auto; padding: 5px 14px; border-radius: 8px; cursor: pointer;
+  font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  border: 1px solid var(--dsw-alias-state-success-primary, #48c784);
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #48c784) 15%, transparent);
+  color: var(--dsw-alias-state-success-primary, #48c784);
+}
+.dsm-xdpool-ledger-run:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #48c784) 28%, transparent); }
+.dsm-xdpool-ledger-run:disabled { opacity: 0.55; cursor: default; }
+.dsm-xdpool-ledger-body { overflow: auto; padding: 6px 20px 20px; }
+.dsm-xdpool-ledger-empty { opacity: 0.7; padding: 26px 0; text-align: center; }
+.dsm-xdpool-ledger-group { margin-top: 16px; }
+.dsm-xdpool-ledger-grouphead {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 0 8px; font-size: 11px; font-weight: 700;
+  letter-spacing: 0.1em; text-transform: none;
+  color: var(--dsw-alias-label-secondary, #98a0b3);
+}
+.dsm-xdpool-ledger-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dsw-alias-label-tertiary, #6b7280); flex: none; }
+.dsm-xdpool-ledger-group[data-tone="success"] .dsm-xdpool-ledger-dot { background: var(--dsw-alias-state-success-primary, #48c784); }
+.dsm-xdpool-ledger-group[data-tone="already"] .dsm-xdpool-ledger-dot { background: var(--dsw-alias-state-business-primary, #7896dc); }
+.dsm-xdpool-ledger-group[data-tone="failed"] .dsm-xdpool-ledger-dot { background: var(--dsw-alias-state-error-primary, #e65a5a); }
+.dsm-xdpool-ledger-rule { flex: 1; border-top: 1px solid var(--dsw-alias-border-l2, #323846); opacity: 0.6; }
+.dsm-xdpool-ledger-count {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px; min-width: 22px; text-align: center;
+  padding: 1px 7px; border-radius: 9px;
+  background: rgba(255, 255, 255, 0.07);
+}
+.dsm-xdpool-ledger-rows { list-style: none; margin: 0; padding: 0; }
+.dsm-xdpool-ledger-line { padding: 7px 2px 8px; border-bottom: 1px dashed var(--dsw-alias-border-l2, #323846); }
+.dsm-xdpool-ledger-line:last-child { border-bottom: 0; }
+.dsm-xdpool-ledger-row { display: flex; align-items: baseline; gap: 10px; }
+.dsm-xdpool-ledger-who { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.dsm-xdpool-ledger-leader {
+  flex: 1; min-width: 24px;
+  border-bottom: 1px dotted var(--dsw-alias-label-tertiary, #4a5162);
+  transform: translateY(-3px);
+}
+.dsm-xdpool-ledger-amount {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px; font-weight: 700; white-space: nowrap;
+  color: var(--dsw-alias-state-success-primary, #48c784);
+}
+.dsm-xdpool-ledger-namount { font-size: 11px; white-space: nowrap; color: var(--dsw-alias-label-tertiary, #7d8496); }
+.dsm-xdpool-ledger-why {
+  margin-top: 3px; padding-left: 2px;
+  font-size: 11.5px; line-height: 16px;
+  color: var(--dsw-alias-label-tertiary, #98a0b3);
+  overflow-wrap: anywhere; white-space: pre-wrap;
+}
+.dsm-xdpool-ledger-group[data-tone="failed"] .dsm-xdpool-ledger-why {
+  color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #e65a5a) 82%, var(--dsw-alias-label-primary, #e8eaf0));
+}
+.dsm-xdpool-ledger-code { opacity: 0.75; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
 `

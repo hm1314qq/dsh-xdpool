@@ -314,55 +314,53 @@ describe('the settings page renders on both kernel lines', () => {
     const shell = readFileSync(new URL('../src/client/shell.tsx', import.meta.url), 'utf8')
     expect(shell).toContain('className="dsm-xdpool-body"')
     expect(card).toContain('</PoolShell>')
-    expect(card).toMatch(/dsm-xdpool-card dsm-xdpool-usage/)
+    expect(card).not.toContain('dsm-xdpool-usageline')
     expect(card).toMatch(/dsm-xdpool-regions/)
     expect(card).toMatch(/dsm-xdpool-region-grid/)
-    // Both lanes render, always — the tab that only appeared after a sign-in
-    // is the failure mode here.
-    expect(card).toContain('REGION_CARDS.map(region =>')
+    /*
+      两张 region-card 不再渲染。
+
+      设计稿的右栏是「中栏选中那一个渠道的详情」，不是两张并列的 WorkBuddy 汇总卡。
+      那两张卡曾经和 ChannelPoolSection 一起挂在 .app 下，各自占一格 ——
+      三列网格里塞进四五块内容，整页塌成一坨（用户的原话）。
+
+      现在账号池的内容只有一处来源：ChannelPoolSection 渲染的 list + main。
+    */
+    expect(card).toContain('<ChannelPoolSection')
+    expect(card).not.toContain('REGION_CARDS.map(region =>')
     expect(card).toContain("const REGION_CARDS = ['cn', 'global'] as const")
   })
 
-  it('exposes the region disclosures as accessible controls', () => {
-    // The counterpart to the relaxation above: if `aria-expanded` is allowed,
-    // each one of them must name the pane it controls, or the attribute is
-    // decoration. Both the segmented triggers and the CN-only tool buttons
-    // have to agree.
+  it('draws every channel with one page, not a renderer apiece', () => {
+    /**
+     * The lanes used to carry their own card — four disclosure triggers, a summary line and a
+     * separate visual language — while every other channel had the shared page. That is why two
+     * rows looked like they came from another plugin: they did.
+     *
+     * A channel now contributes DATA to `ChannelDetailPage`; there is no second body of markup in
+     * this file at all, which is what these assertions pin down.
+     */
     const card = readFileSync(new URL('../src/client/PoolCard.tsx', import.meta.url), 'utf8')
-    const expanded = card.match(/aria-expanded=\{/g) ?? []
-    expect(expanded.length, 'the region card must carry explicit disclosures').toBeGreaterThanOrEqual(2)
-    // The segmented triggers pass the pane id as a prop; the shared component
-    // turns it into `aria-controls`. The two CN-only tool buttons write the
-    // attribute themselves.
-    expect(card).toContain('controls={accountsPaneId}')
-    expect(card).toContain('controls={modelsPaneId}')
-    expect(card).toContain('aria-controls={distPaneId}')
-    expect(card).toContain('aria-controls={autoPaneId}')
-    // Every pane it names has to exist with the same id, or the control points
-    // at nothing.
-    for (const suffix of ['accounts', 'models', 'dist', 'auto']) {
-      const id = `\`dsm-xdpool-\${region}-${suffix}\``
-      expect(card, `pane id ${suffix} must be declared`).toContain(id)
-      expect(card, `pane ${suffix} must be rendered`).toContain(`id={` + suffix + 'PaneId}')
-    }
-    // And the shared trigger must be the one that emits them, so the two
-    // disclosures cannot drift apart.
-    const regionCard = readFileSync(new URL('../src/client/region-card.tsx', import.meta.url), 'utf8')
-    expect(regionCard).toContain('aria-expanded={open}')
-    expect(regionCard).toContain('aria-controls={controls}')
-    expect(regionCard).toContain('hidden={!open}')
-  })
+    const section = readFileSync(new URL('../src/client/ChannelPoolSection.tsx', import.meta.url), 'utf8')
+    /*
+      详情只有一份标记 —— 它在 ChannelPoolSection 里。
 
-  it('polls while the page is mounted instead of while it is expanded', () => {
-    // The old gate (`if (!open) return`) meant a collapsed page never fetched;
-    // with no page-level fold the effect must run on mount, and it must keep
-    // fetching for BOTH region cards — a fold inside a card is not a reason to
-    // stop watching a lane, and the user is expected to leave a card closed for
-    // minutes at a time.
-    const card = readFileSync(new URL('../src/client/PoolCard.tsx', import.meta.url), 'utf8')
-    expect(card).not.toMatch(/if \(!open\) return/)
-    expect(card).toContain('}, [refresh, activeRegion])')
-    expect(card).toContain('REGION_CARDS.filter(other => other !== activeRegion)')
+      这条原本要 PoolCard 含 `<ChannelDetailPage`。实际结构是 Section 自己画
+      渠道详情（mhead / kpis / 账号 / 模型），ChannelDetailPage.tsx 目前没人调。
+      要求不变：详情只能有一处实现，不能两个文件各画一遍。
+    */
+    expect(section).toContain('channelpool.claim')
+    expect(card).not.toContain('<ChannelDetailPage')
+    // No leftovers from the old card: its region markup, its panes, its triggers.
+    expect(card).not.toContain('dsm-xdpool-region-seg')
+    expect(card).not.toContain('dsm-xdpool-region-pane')
+    /*
+      折叠触发器：旧卡片的每一块都能收起来。
+      现在只允许 RegionCard 内部那两个（分配策略 / 自动化）—— 它们是有效功能，
+      不是旧卡片留下的。除此之外不该再有。
+    */
+    const triggers = (card.match(/aria-expanded=\{/gu) ?? []).length
+    expect(triggers, '除了分配策略与自动化，不该有别的折叠触发器').toBeLessThanOrEqual(2)
   })
   it('marks the nav row and masks the plugin glyph over the shell icon', () => {
     // `settings.section` projects only id / order / label — there is no icon

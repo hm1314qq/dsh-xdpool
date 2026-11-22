@@ -18,6 +18,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { basename } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import { originTrusted, type TrustedHosts } from './origin-trust.ts'
+import { checkForUpdate } from './update-check.ts'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { WorkBuddyAccount, WorkBuddyAccountPool } from './accounts.ts'
 import type { WorkBuddyCatalog } from './catalog.ts'
@@ -83,6 +85,8 @@ import {
   type PoolWebRelayPatch,
   type PoolWebRelayStatus,
 } from './status-paths.ts'
+import { POOL_UPDATE_CHECK_PATH, POOL_UPDATE_INSTALL_PATH } from './status-paths.ts'
+import { updateToLatest } from './update-install.ts'
 /**
  * One aggregate model row as the card renders it.
  *
@@ -96,6 +100,14 @@ export type { PoolWebStatus }
 /** Constructor dependencies — a narrow slice of the pool runtime. */
 export interface PoolStatusRouteOptions {
   pool: WorkBuddyAccountPool
+  /**
+   * The authorities this deployment serves, read per request.
+   *
+   * Passed through from `connection.trustedHosts` so the plugin's gate agrees with the host's
+   * own `/api` bridge. They disagreed once, and the symptom was a card that displayed its data
+   * and refused every button — see `origin-trust.ts`.
+   */
+  trustedHosts?: () => TrustedHosts
   /** One catalog per region; the card reads the one for its active tab. */
   catalogs: Readonly<Record<PoolRegion, WorkBuddyCatalog>>
   client: WorkBuddyUpstreamClient
@@ -256,6 +268,15 @@ export interface PoolStatusRouteOptions {
    */
   channelsDocument?: () => PoolWebChannelsStatus
   /**
+   * How each channel picks its account, and the pool-wide default.
+   *
+   * Read from the plugin's own file rather than the host's settings document: the host's write
+   * path for a plugin section accepts only its own toggle, so the per-channel overrides live where
+   * this plugin already keeps state.
+   */
+  channelUsage?: () => { pool: string; channels: Record<string, string> }
+  setChannelUsage?: (channel: string, strategy: string | undefined) => Promise<void>
+  /**
    * The chains plus the roster their members are drawn from, built host-side.
    *
    * One dep because the two halves are the same question asked twice — "what can
@@ -318,17 +339,6 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body)
   res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) })
   res.end(payload)
-}
-/** Loopback browser origins only; other devices are refused. */
-function loopbackOrigin(req: IncomingMessage): boolean {
-  const origin = req.headers.origin
-  if (origin === undefined) return true
-  try {
-    const { hostname } = new URL(origin)
-    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]' || hostname === '::1'
-  } catch {
-    return false
-  }
 }
 /** Smallest possible POST body reader, capped so a hung or oversized body
  *  cannot pin memory on the Host. Returns `{}` for an empty body. */
@@ -675,6 +685,27 @@ function parseProviderId(body: Record<string, unknown>): string | undefined {
   return isProviderId(providerId) ? providerId : undefined
 }
 /**
+ * 注册表模型的显示信息（名字 / 识图 / 推理），按 id 索引。
+ *
+ * 聚合页只拿得到模型 id 列表；没有这一份，未接入厂商的卡片只能把
+ * claude-opus-4-7 这种 id 当名字显示。只收注册表写明的字段，null 一律不传。
+ */
+function aggregateModelMetaOf(
+  models: readonly { id: string; name: string; vision: boolean | null; reasoning: boolean | null }[],
+): Record<string, { name: string; vision?: boolean; reasoning?: boolean }> | undefined {
+  if (!Array.isArray(models) || models.length === 0) return undefined
+  const meta: Record<string, { name: string; vision?: boolean; reasoning?: boolean }> = {}
+  for (const model of models) {
+    if (model === null || typeof model !== 'object' || typeof model.id !== 'string') continue
+    meta[model.id] = {
+      name: typeof model.name === 'string' && model.name !== '' ? model.name : model.id,
+      ...model.vision === true ? { vision: true } : {},
+      ...model.reasoning === true ? { reasoning: true } : {},
+    }
+  }
+  return meta
+}
+/**
  * Build the document the aggregate card renders from one store read.
  *
  * The provider rows NEVER carry the key — only whether one is present. That is
@@ -743,6 +774,10 @@ export function aggregateStatusOf(
       // showing a switch that cannot do anything.
       keyCount: providerApiKeys(setting).length,
       ...setting.distribution === undefined ? {} : { distribution: setting.distribution },
+      ...(() => {
+        const modelMeta = aggregateModelMetaOf(provider.models)
+        return modelMeta === undefined ? {} : { modelMeta }
+      })(),
     })
   }
   return {
@@ -1032,12 +1067,28 @@ export async function poolWebStatus(
  */
 export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptions): void {
   ctx.effect(() => {
+    const disposeChannels = ctx.webServer.register({
+      kind: 'exact',
+      path: POOL_CHANNELS_PATH,
+      handler: (req: IncomingMessage, res: ServerResponse) => {
+        if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) return json(res, 403, { error: 'origin-not-trusted' })
+        if (deps.channelsDocument === undefined) {
+          return json(res, 503, { error: 'the login channels are not available in this build' })
+        }
+        try {
+          json(res, 200, deps.channelsDocument())
+        } catch (error: unknown) {
+          json(res, 500, { error: safeMessage(error) })
+        }
+      },
+    })
     const disposeStatus = ctx.webServer.register({
       kind: 'exact',
       path: POOL_STATUS_PATH,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' })
-        if (!loopbackOrigin(req)) return json(res, 403, { error: 'origin-not-trusted' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) return json(res, 403, { error: 'origin-not-trusted' })
         try {
           // The card asks for one region at a time; an unknown value falls back
           // to cn rather than 400-ing, because the tab strip is not the source
@@ -1062,7 +1113,7 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
       path: POOL_USAGE_PATH,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' })
-        if (!loopbackOrigin(req)) return json(res, 403, { error: 'origin-not-trusted' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) return json(res, 403, { error: 'origin-not-trusted' })
         if (deps.usage === undefined) {
           return json(res, 503, { error: 'usage accounting is not available in this build' })
         }
@@ -1090,7 +1141,7 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
       path: POOL_CATALOG_REFRESH_PATH,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
-        if (!loopbackOrigin(req)) return json(res, 403, { error: 'origin-not-trusted' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) return json(res, 403, { error: 'origin-not-trusted' })
         if (deps.refreshCatalog === undefined) {
           return json(res, 503, { error: 'catalog refresh is not available in this build' })
         }
@@ -1107,7 +1158,7 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
       path: POOL_RESCAN_PATH,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
-        if (!loopbackOrigin(req)) return json(res, 403, { error: 'origin-not-trusted' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) return json(res, 403, { error: 'origin-not-trusted' })
         try {
           const accounts = await deps.pool.scan()
           json(res, 200, { accounts: accounts.length })
@@ -1121,7 +1172,7 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
       path: POOL_RESET_COOLDOWN_PATH,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
-        if (!loopbackOrigin(req)) return json(res, 403, { error: 'origin-not-trusted' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) return json(res, 403, { error: 'origin-not-trusted' })
         deps.pool.resetCooldowns()
         json(res, 200, { ok: true })
       },
@@ -1135,7 +1186,7 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
       path: POOL_CHECKIN_PATH,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
-        if (!loopbackOrigin(req)) return json(res, 403, { error: 'origin-not-trusted' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) return json(res, 403, { error: 'origin-not-trusted' })
         try {
           const body = await readJsonBody(req)
           const accountId = typeof body['accountId'] === 'string' ? body['accountId'] : ''
@@ -1165,7 +1216,7 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
       path: POOL_MODELS_SAVE_PATH,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
-        if (!loopbackOrigin(req)) return json(res, 403, { error: 'origin-not-trusted' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) return json(res, 403, { error: 'origin-not-trusted' })
         if (deps.saveSelection === undefined) {
           return json(res, 503, { error: 'settings service unavailable; model selection cannot be saved' })
         }
@@ -1190,7 +1241,7 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
       path: POOL_ACCOUNT_DISABLE_PATH,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
-        if (!loopbackOrigin(req)) return json(res, 403, { error: 'origin-not-trusted' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) return json(res, 403, { error: 'origin-not-trusted' })
         if (deps.setAccountDisabled === undefined) {
           return json(res, 503, { error: 'settings service unavailable; the account switch cannot be saved' })
         }
@@ -1224,7 +1275,7 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
       path: POOL_ACCOUNT_IGNORE_PATH,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
-        if (!loopbackOrigin(req)) return json(res, 403, { error: 'origin-not-trusted' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) return json(res, 403, { error: 'origin-not-trusted' })
         if (deps.setAccountIgnored === undefined) {
           return json(res, 503, { error: 'settings service unavailable; the ignore list cannot be saved' })
         }
@@ -1250,7 +1301,7 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
       path: POOL_ACCOUNT_PREFER_PATH,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
-        if (!loopbackOrigin(req)) return json(res, 403, { error: 'origin-not-trusted' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) return json(res, 403, { error: 'origin-not-trusted' })
         if (deps.setPreferredAccount === undefined) {
           return json(res, 503, { error: 'the preferred account cannot be saved in this build' })
         }
@@ -1282,7 +1333,7 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
       path: POOL_AUTOMATION_RUN_PATH,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
-        if (!loopbackOrigin(req)) return json(res, 403, { error: 'origin-not-trusted' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) return json(res, 403, { error: 'origin-not-trusted' })
         if (deps.runAutomation === undefined) {
           return json(res, 503, { error: 'automation is not available in this build' })
         }
@@ -1312,7 +1363,7 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
       path: POOL_CREDIT_RESERVE_PATH,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
-        if (!loopbackOrigin(req)) return json(res, 403, { error: 'origin-not-trusted' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) return json(res, 403, { error: 'origin-not-trusted' })
         if (deps.setCreditReserve === undefined) {
           return json(res, 503, { error: 'settings service unavailable; the reserve cannot be saved' })
         }
@@ -1346,7 +1397,7 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
       path: POOL_AGGREGATE_PATH,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' })
-        if (!loopbackOrigin(req)) return json(res, 403, { error: 'origin-not-trusted' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) return json(res, 403, { error: 'origin-not-trusted' })
         if (deps.aggregateDocument === undefined) {
           return json(res, 503, { error: 'the aggregate lane is not available in this build' })
         }
@@ -1374,7 +1425,7 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
       path: POOL_AGGREGATE_SAVE_PATH,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
-        if (!loopbackOrigin(req)) return json(res, 403, { error: 'origin-not-trusted' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) return json(res, 403, { error: 'origin-not-trusted' })
         if (deps.saveAggregate === undefined) {
           return json(res, 503, { error: 'the aggregate lane is not available in this build' })
         }
@@ -1406,7 +1457,7 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
       path: POOL_AGGREGATE_TEST_PATH,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
-        if (!loopbackOrigin(req)) return json(res, 403, { error: 'origin-not-trusted' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) return json(res, 403, { error: 'origin-not-trusted' })
         if (deps.probeAggregate === undefined) {
           return json(res, 503, { error: 'the aggregate lane is not available in this build' })
         }
@@ -1438,7 +1489,7 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
       path: POOL_MODEL_PROBE_PATH,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
-        if (!loopbackOrigin(req)) return json(res, 403, { error: 'origin-not-trusted' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) return json(res, 403, { error: 'origin-not-trusted' })
         if (deps.probeModel === undefined) {
           return json(res, 503, { error: 'the connectivity probe is not available in this build' })
         }
@@ -1487,7 +1538,7 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
       path: POOL_CHANNEL_MODELS_PATH,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
-        if (!loopbackOrigin(req)) return json(res, 403, { error: 'origin-not-trusted' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) return json(res, 403, { error: 'origin-not-trusted' })
         if (deps.channelModels === undefined) {
           return json(res, 503, { error: 'the login channels are not available in this build' })
         }
@@ -1506,7 +1557,7 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
       path: POOL_AGGREGATE_DISCOVER_PATH,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
-        if (!loopbackOrigin(req)) return json(res, 403, { error: 'origin-not-trusted' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) return json(res, 403, { error: 'origin-not-trusted' })
         if (deps.discoverAggregate === undefined) {
           return json(res, 503, { error: 'the aggregate lane is not available in this build' })
         }
@@ -1523,22 +1574,6 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
     // The login-channel list. GET only, and answered even when the pack failed
     // to mount: an `unavailable` state plus its reason is far more actionable than
     // a 503, because the card can then say what went wrong instead of guessing.
-    const disposeChannels = ctx.webServer.register({
-      kind: 'exact',
-      path: POOL_CHANNELS_PATH,
-      handler: (req: IncomingMessage, res: ServerResponse) => {
-        if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' })
-        if (!loopbackOrigin(req)) return json(res, 403, { error: 'origin-not-trusted' })
-        if (deps.channelsDocument === undefined) {
-          return json(res, 503, { error: 'the login channels are not available in this build' })
-        }
-        try {
-          json(res, 200, deps.channelsDocument())
-        } catch (error: unknown) {
-          json(res, 500, { error: safeMessage(error) })
-        }
-      },
-    })
     /**
      * The chain list plus the roster its members are drawn from.
      *
@@ -1552,7 +1587,7 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
       path: POOL_COMBOS_PATH,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' })
-        if (!loopbackOrigin(req)) return json(res, 403, { error: 'origin-not-trusted' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) return json(res, 403, { error: 'origin-not-trusted' })
         if (deps.combosDocument === undefined) {
           return json(res, 503, { error: 'the routing chains are not available in this build' })
         }
@@ -1576,7 +1611,7 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
       path: POOL_CREDITS_SPEND_PATH,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' })
-        if (!loopbackOrigin(req)) return json(res, 403, { error: 'origin-not-trusted' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) return json(res, 403, { error: 'origin-not-trusted' })
         if (deps.creditsSpend === undefined) {
           return json(res, 503, { error: 'credit accounting is not available in this build' })
         }
@@ -1604,7 +1639,7 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
       path: POOL_COMBOS_SAVE_PATH,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
-        if (!loopbackOrigin(req)) return json(res, 403, { error: 'origin-not-trusted' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) return json(res, 403, { error: 'origin-not-trusted' })
         if (deps.saveCombos === undefined) {
           return json(res, 503, { error: 'the routing chains are not available in this build' })
         }
@@ -1650,7 +1685,7 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
         if (req.method !== 'GET' && req.method !== 'POST') {
           return json(res, 405, { error: 'method not allowed' })
         }
-        if (!loopbackOrigin(req)) return json(res, 403, { error: 'origin-not-trusted' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) return json(res, 403, { error: 'origin-not-trusted' })
         if (deps.relayDocument === undefined || deps.saveRelay === undefined) {
           return json(res, 503, { error: 'the LAN relay is not available in this build' })
         }
@@ -1666,7 +1701,63 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
         }
       },
     })
+    /**
+     * Is there a newer build?
+     *
+     * `POST` forces a fresh read — that is the panel's button, and a button that silently
+     * returns a cached answer is indistinguishable from one that did nothing.
+     */
+    const disposeUpdate = ctx.webServer.register({
+      kind: 'exact',
+      path: POOL_UPDATE_CHECK_PATH,
+      handler: async (req: IncomingMessage, res: ServerResponse) => {
+        if (req.method !== 'GET' && req.method !== 'POST') {
+          return json(res, 405, { error: 'method not allowed' })
+        }
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) {
+          return json(res, 403, { error: 'origin-not-trusted' })
+        }
+        try {
+          return json(res, 200, await checkForUpdate({ force: req.method === 'POST' }))
+        } catch (error: unknown) {
+          return json(res, 200, {
+            current: 'unknown',
+            newer: false,
+            error: safeMessage(error),
+            checkedAt: new Date().toISOString(),
+          })
+        }
+      },
+    })
+
+    /**
+     * Install the newest build.
+     *
+     * `POST` only, and the BODY is ignored: the version comes from the same check the panel
+     * shows, never from the caller. An endpoint that writes `package.json` must not take a
+     * version string on trust.
+     */
+    const disposeInstall = ctx.webServer.register({
+      kind: 'exact',
+      path: POOL_UPDATE_INSTALL_PATH,
+      handler: async (req: IncomingMessage, res: ServerResponse) => {
+        if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) {
+          return json(res, 403, { error: 'origin-not-trusted' })
+        }
+        try {
+          return json(res, 200, await updateToLatest())
+        } catch (error: unknown) {
+          // updateToLatest 自己的失败都已经是中文；这里只兜底它没预料到的异常，同样给中文，
+          // 并说明数据没动 —— 抛出发生在改 package.json 之前（它是最后一步）。
+          return json(res, 200, { ok: false, restartRequired: false, error: `更新失败（${safeMessage(error)}），插件和数据都没有改动` })
+        }
+      },
+    })
+
     return () => {
+      disposeInstall()
+      disposeUpdate()
       disposeRelay()
       disposeCombosSave()
       disposeCombos()

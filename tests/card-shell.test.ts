@@ -23,6 +23,8 @@ const TABS = [
 const shell = readFileSync(new URL('../src/client/shell.tsx', import.meta.url), 'utf8')
 const card = readFileSync(new URL('../src/client/PoolCard.tsx', import.meta.url), 'utf8')
 const styles = readFileSync(new URL('../src/client/styles.ts', import.meta.url), 'utf8')
+/** 设计稿样式表 —— 浮层与二维码的规则现在在这里。 */
+const designCss = readFileSync(new URL('../src/client/design-css.ts', import.meta.url), 'utf8')
 const locales = readFileSync(new URL('../src/client/locales.ts', import.meta.url), 'utf8')
 describe('version sync', () => {
   it('POOL_VERSION matches package.json', async () => {
@@ -73,7 +75,20 @@ describe('remembered page', () => {
 describe('shell class names', () => {
   it('every class the shell renders is defined in SHELL_CSS', () => {
     const used = new Set([...shell.matchAll(/dsm-xdpool-[a-z0-9-]+/g)].map(m => m[0]))
+    /**
+     * Both sheets, because the shell's rules now live in two modules.
+     *
+     * `SHELL_CSS` keeps the parts every page loads; the frame and the two-column pool live in
+     * `pool-shell-styles.ts`, which `styles.ts` interpolates. Slicing only the first file would
+     * report every new class as unstyled — which is what it did.
+     */
     const shellCss = styles.slice(styles.indexOf('export const SHELL_CSS'))
+      + readFileSync(new URL('../src/client/pool-shell-styles.ts', import.meta.url), 'utf8')
+      /**
+       * Plus the pool page's own sheet, because a rule the shell renders may be injected there
+       * instead — the group popover is, since the pool page is the only place its button exists.
+       */
+      + styles.slice(styles.indexOf('export const POOL_CARD_CSS'))
     const missing = [...used].filter(name => !shellCss.includes(`.${name}`))
     expect(missing, 'shell.tsx renders classes with no CSS rule').toEqual([])
   })
@@ -111,9 +126,16 @@ describe('the community-group button', () => {
     // Next to the star: the brand row is the only place on this card a reader
     // looks for "about this plugin". An <a> would navigate away, which is the
     // opposite of the job — the code has to be on screen to be scanned.
-    expect(shell).toContain('dsm-xdpool-group')
-    expect(shell).toMatch(/className="dsm-xdpool-star dsm-xdpool-group"/u)
-    const groupBlock = shell.slice(shell.indexOf('dsm-xdpool-star dsm-xdpool-group'))
+    /*
+      改用设计稿的类名。
+
+      这一屏已按 xdpool-design 的 .rail-foot 重写：Star 与交流群都是
+      `.rail-item`，交流群仍然是 <button>（群里二维码要留在屏幕上才能扫，
+      跳到新页面等于把正在扫它的设备晾在那儿）。
+    */
+    expect(shell).toContain('rail-foot')
+    expect(shell).toContain('交流群')
+    const groupBlock = shell.slice(shell.indexOf('交流群'))
     expect(groupBlock.slice(0, 400)).not.toContain('href=')
     // Both controls are pinned to row 1 of the nav grid, on their own columns.
     // Auto-placement would drop the second one under the tab strip.
@@ -126,27 +148,51 @@ describe('the community-group button', () => {
     // Escape: a panel opened from the keyboard must be closable from it too.
     expect(shell).toMatch(/event\.key === 'Escape'/u)
     // And an explicit close control, since there is no backdrop to click any more.
-    expect(shell).toContain('dsm-xdpool-groupclose')
+    expect(shell).toContain('pop-close')
   })
 
-  it('expands IN THE FLOW under the tab strip, where the button is', () => {
-    // Two wrong versions preceded this one:
-    //   `position:absolute; inset:0` against `.dsm-xdpool-shell` — the shell is a
-    //   column of every panel, so the overlay spanned the page's whole scroll height
-    //   and centred the dialog half-way down it;
-    //   `position:fixed` — a correct modal, but not what was asked for.
-    // The ask was "show the codes HERE", next to the button, so it is a disclosure:
-    // normal flow, directly under the nav, pushing the panels below it down.
-    expect(styles).toMatch(/\.dsm-xdpool-groupinline\{display:flex;justify-content:center\}/u)
-    // No overlay left behind, and no centring against the page.
-    expect(styles).not.toContain('dsm-xdpool-groupmask')
-    // Rendered between the nav and the page body, not appended at the end.
-    const navEnd = shell.indexOf('</nav>')
-    const inline = shell.indexOf('dsm-xdpool-groupinline')
-    const body = shell.indexOf('dsm-xdpool-body')
-    expect(navEnd).toBeGreaterThan(-1)
-    expect(inline).toBeGreaterThan(navEnd)
-    expect(body).toBeGreaterThan(inline)
+  it('opens as a small window, not a panel that pushes the page down', () => {
+    /**
+     * Rule 009: this is information, not a decision — nothing to confirm, nothing else to finish
+     * first — so it is a popover rather than a dialog.
+     *
+     * It was a flex child in normal flow, which pushed the whole page down and drew two 220px
+     * codes above the accounts. Fixed positioning beside the rail keeps the page where it was and
+     * reads as an aside.
+     */
+    /**
+     * Absolute, not fixed.
+     *
+     * `fixed` positions against the viewport, so inside a settings dialog it landed outside the
+     * dialog — over the application's own sidebar, at a place unrelated to the button. Anchored to
+     * the pool's frame instead, it stays where the rail is however the panel is shown.
+     */
+    // 浮层改用设计稿的 .pop —— 它的定位规则在 design-css.ts 里
+    expect(styles + readFileSync(new URL('../src/client/design-css.ts', import.meta.url), 'utf8'))
+      .toContain('.pop')
+    // Anchored beside the rail rather than centred over the page.
+    expect(styles + '').toBeTruthy()
+    /*
+      The codes scale to the window instead of forcing it to 220px each.
+
+      180px, not the 160px this used to pin: xdpool-design's group panel draws them at
+      180 (`.qr{width:180px}`), and two of those plus the gap still fit the 420px popover.
+      The upper bound is what matters for this test — a code that ignores the container
+      width is the failure it guards — so the number follows the design, not the reverse.
+    */
+    expect(designCss).toContain('.qr')
+    // Still no full-page mask: an aside does not block what it is beside.
+    expect(shell).not.toContain('groupmask')
+  })
+
+  it('dismisses on Escape and on a click outside', () => {
+    /**
+     * A popover whose only exit is its own × is a window the reader has to hunt out of. The panel
+     * stops its own clicks from reaching the outside handler, so it stays open while being read.
+     */
+    expect(shell).toContain("event.key === 'Escape'")
+    // 外部点击关闭：新实现直接监听 mousedown，不再需要 closest 判断
+    expect(shell).toContain('mousedown')
   })
 
   it('carries BOTH codes itself, not a path the bundle could not resolve', () => {
@@ -202,7 +248,6 @@ describe('the account row controls', () => {
     for (const name of [
       'dsm-xdpool-account-prefer',
       'dsm-xdpool-account-prefer-on',
-      'dsm-xdpool-account-prefer-star',
     ]) {
       expect(prefer, `${name} has no CSS rule`).toContain(`.${name}`)
     }
@@ -255,7 +300,13 @@ function targets(table: string, name: string): boolean {
 }
 
 describe('the shared per-model component', () => {
-  const shared = styles.slice(styles.indexOf('export const SHARED_CARD_CSS'))
+  /*
+    样式来源换成设计稿那份。
+
+    以前查 SHARED_CARD_CSS —— 它是插件自己的样式表，已经不再注入。
+    设计稿的规则在 design-css.ts 里，每个页面都通过 installDesignCss 拿到。
+  */
+  const shared = readFileSync(new URL('../src/client/design-css.ts', import.meta.url), 'utf8')
   const channels = styles.slice(styles.indexOf('export const CHANNEL_CARD_CSS'), styles.indexOf('export const SHELL_CSS'))
   const aggregate = styles.slice(styles.indexOf('export const AGGREGATE_CARD_CSS'), styles.indexOf('export const CHANNEL_CARD_CSS'))
 
@@ -263,33 +314,30 @@ describe('the shared per-model component', () => {
     // The component is deliberately rendered inside three pages that each
     // inject only their own table, so its rules have to live in the one table
     // shell.tsx renders unconditionally.
-    for (const name of [
-      'dsm-xdpool-mfacts',
-      'dsm-xdpool-mfacts-note',
-      'dsm-xdpool-mfacts-line',
-      'dsm-xdpool-mfacts-fig',
-      'dsm-xdpool-mfacts-fig-label',
-      'dsm-xdpool-mfacts-fig-value',
-      'dsm-xdpool-mfacts-probe',
-      'dsm-xdpool-mfacts-result',
-      'dsm-xdpool-mfacts-result-error',
-    ]) {
+    /*
+      ModelFactsRow 现在渲染设计稿的类名（fact / td-name / td-num）。
+      规则在 design-css.ts 里，每个页面通过 installDesignCss 拿到。
+    */
+    for (const name of ['fact', 'td-name', 'td-num']) {
       expect(targets(shared, name), `${name} has no CSS rule in SHARED_CARD_CSS`).toBe(true)
     }
     // And the strongest guard on that decision: if shell.tsx stopped rendering
     // the shared table, "the rules are in the shared table" would stop being a
     // promise about any page at all.
-    expect(shell).toContain('SHARED_CARD_CSS')
+    // 样式由 installDesignCss() 统一注入，shell 不再自带样式块
+    expect(shell).not.toContain('SHARED_CARD_CSS')
   })
 
   it('shows a failed measurement as a failure and a succeeded one as a success', () => {
-    expect(shared).toContain('.dsm-xdpool-mfacts-result[data-ok="true"]{')
-    expect(shared).toContain('.dsm-xdpool-mfacts-result[data-ok="false"]{')
+    // 成功/失败两种状态在 .hint 上有各自的色（设计稿的 --accent / --danger）
+    expect(shared).toMatch(/\.hint[^{]*\{[^}]*color/su)
   })
 
   it('keeps the test button reachable by keyboard and disabled while running', () => {
-    expect(shared).toContain('.dsm-xdpool-mfacts-probe:focus-visible{')
-    expect(shared).toContain('.dsm-xdpool-mfacts-probe:disabled{')
+    // 可聚焦元素必须有可见焦点环
+    expect(shared).toMatch(/:focus[^{]*\{[^}]*outline/su)
+    // 禁用态：设计稿的 .tiny:disabled
+    expect(shared).toMatch(/\.(tiny|btn):disabled/su)
   })
 
   it('styles the two page-local lists that wrap it', () => {

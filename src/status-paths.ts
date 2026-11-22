@@ -41,6 +41,91 @@ export const POOL_ACCOUNT_DISABLE_PATH = '/plugins/dsh-xdpool/accounts/disabled'
 export const POOL_ACCOUNT_IGNORE_PATH = '/plugins/dsh-xdpool/accounts/ignored'
 /** Run one automation job immediately, so the card can verify it on demand. */
 export const POOL_AUTOMATION_RUN_PATH = '/plugins/dsh-xdpool/automation/run'
+
+/** Is there a newer build of this plugin? */
+export const POOL_UPDATE_CHECK_PATH = '/plugins/dsh-xdpool/update'
+
+/** Marvis (腾讯应用宝 AI): the stored accounts, and how to forget them. */
+export const POOL_MARVIS_SESSION_PATH = '/plugins/dsh-xdpool/marvis/session'
+
+/** Open a browser and drive a QQ / WeChat sign-in there. */
+export const POOL_MARVIS_LOGIN_PATH = '/plugins/dsh-xdpool/marvis/login'
+
+/** Swap a pasted callback URL for a session. */
+export const POOL_MARVIS_PASTE_PATH = '/plugins/dsh-xdpool/marvis/paste'
+
+/** The daily token wallet. */
+export const POOL_MARVIS_WALLET_PATH = '/plugins/dsh-xdpool/marvis/wallet'
+
+/** AStudio (科大讯飞 Astron Studio): the stored accounts. */
+export const POOL_ASTUDIO_SESSION_PATH = '/plugins/dsh-xdpool/astudio/session'
+/** AStudio: browser sign-in on the web console (phone + SMS code). */
+export const POOL_ASTUDIO_BROWSER_LOGIN_PATH = '/plugins/dsh-xdpool/astudio/browser-login'
+/** Take a pasted credential. */
+export const POOL_ASTUDIO_LOGIN_PATH = '/plugins/dsh-xdpool/astudio/login'
+/** Points balance and membership. */
+export const POOL_ASTUDIO_WALLET_PATH = '/plugins/dsh-xdpool/astudio/wallet'
+/** The daily login reward. */
+export const POOL_ASTUDIO_CHECKIN_PATH = '/plugins/dsh-xdpool/astudio/checkin'
+
+/** MagiCrew 国内: session, points, check-in. */
+/** MagiCrew: phone + password sign-in (the JWT paste stays as the fallback). */
+export const POOL_MAGICREW_CN_LOGIN_PATH = '/plugins/dsh-xdpool/magicrew/login'
+export const POOL_MAGICREW_INTL_LOGIN_PATH = '/plugins/dsh-xdpool/magicrew-intl/login'
+export const POOL_MAGICREW_CN_SESSION_PATH = '/plugins/dsh-xdpool/magicrew/session'
+export const POOL_MAGICREW_CN_WALLET_PATH = '/plugins/dsh-xdpool/magicrew/wallet'
+export const POOL_MAGICREW_CN_CHECKIN_PATH = '/plugins/dsh-xdpool/magicrew/checkin'
+/** MagiCrew 国际: its own account, its own balance. */
+export const POOL_MAGICREW_INTL_SESSION_PATH = '/plugins/dsh-xdpool/magicrew-intl/session'
+export const POOL_MAGICREW_INTL_WALLET_PATH = '/plugins/dsh-xdpool/magicrew-intl/wallet'
+export const POOL_MAGICREW_INTL_CHECKIN_PATH = '/plugins/dsh-xdpool/magicrew-intl/checkin'
+/**
+ * 账号列表 / 开关 / 删单个账号。
+ *
+ * 和 session 分开：session 管「登录/退出」这条线，accounts 管「池子里这几个号」。
+ * 一个渠道多个账号时，退出整站和删掉某一个号是两件事。
+ */
+export const POOL_MAGICREW_CN_ACCOUNTS_PATH = '/plugins/dsh-xdpool/magicrew/accounts'
+export const POOL_MAGICREW_INTL_ACCOUNTS_PATH = '/plugins/dsh-xdpool/magicrew-intl/accounts'
+
+/** Accio (阿里): the stored account, and the quota buckets. */
+export const POOL_ACCIO_SESSION_PATH = '/plugins/dsh-xdpool/accio/session'
+/** Accio: OAuth 2.0 + PKCE, on a loopback of our own. */
+export const POOL_ACCIO_OAUTH_LOGIN_PATH = '/plugins/dsh-xdpool/accio/oauth-login'
+export const POOL_ACCIO_QUOTA_PATH = '/plugins/dsh-xdpool/accio/quota'
+
+
+/** MonkeyCode 国内: session and wallet. */
+export const POOL_MONKEYCODE_CN_SESSION_PATH = '/plugins/dsh-xdpool/monkeycode/session'
+/** MonkeyCode: browser sign-in (the session cookie is HttpOnly). */
+export const POOL_MONKEYCODE_CN_BROWSER_LOGIN_PATH = '/plugins/dsh-xdpool/monkeycode/browser-login'
+export const POOL_MONKEYCODE_INTL_BROWSER_LOGIN_PATH = '/plugins/dsh-xdpool/monkeycode-intl/browser-login'
+export const POOL_MONKEYCODE_CN_WALLET_PATH = '/plugins/dsh-xdpool/monkeycode/wallet'
+/** MonkeyCode 国际: its own account. */
+export const POOL_MONKEYCODE_INTL_SESSION_PATH = '/plugins/dsh-xdpool/monkeycode-intl/session'
+export const POOL_MONKEYCODE_INTL_WALLET_PATH = '/plugins/dsh-xdpool/monkeycode-intl/wallet'
+
+/** 百智云: the stored key and session, the wallet, and the daily credit. */
+export const POOL_BAIZHI_SESSION_PATH = '/plugins/dsh-xdpool/baizhi/session'
+/** 百智云: browser sign-in, which also fetches the API key. */
+export const POOL_BAIZHI_BROWSER_LOGIN_PATH = '/plugins/dsh-xdpool/baizhi/browser-login'
+export const POOL_BAIZHI_WALLET_PATH = '/plugins/dsh-xdpool/baizhi/wallet'
+export const POOL_BAIZHI_CHECKIN_PATH = '/plugins/dsh-xdpool/baizhi/checkin'
+
+/** AutoClaw 国际: session and the five-bucket wallet. */
+export const POOL_AUTOCLAW_INTL_SESSION_PATH = '/plugins/dsh-xdpool/autoclaw/session'
+/** AutoClaw: SMS sign-in (send a code, then exchange it). */
+export const POOL_AUTOCLAW_INTL_SEND_CODE_PATH = '/plugins/dsh-xdpool/autoclaw/send-code'
+export const POOL_AUTOCLAW_INTL_CODE_LOGIN_PATH = '/plugins/dsh-xdpool/autoclaw/code-login'
+export const POOL_AUTOCLAW_CN_SEND_CODE_PATH = '/plugins/dsh-xdpool/autoclaw-cn/send-code'
+export const POOL_AUTOCLAW_CN_CODE_LOGIN_PATH = '/plugins/dsh-xdpool/autoclaw-cn/code-login'
+export const POOL_AUTOCLAW_INTL_WALLET_PATH = '/plugins/dsh-xdpool/autoclaw/wallet'
+/** AutoClaw 国内: its own account on a different host. */
+export const POOL_AUTOCLAW_CN_SESSION_PATH = '/plugins/dsh-xdpool/autoclaw-cn/session'
+export const POOL_AUTOCLAW_CN_WALLET_PATH = '/plugins/dsh-xdpool/autoclaw-cn/wallet'
+
+/** Install the newest build. The host applies it on the next start. */
+export const POOL_UPDATE_INSTALL_PATH = '/plugins/dsh-xdpool/update/install'
 /** Set or clear one account's reserved-credit floor. */
 export const POOL_CREDIT_RESERVE_PATH = '/plugins/dsh-xdpool/accounts/credit-reserve'
 /**
@@ -181,6 +266,45 @@ export const POOL_AGGREGATE_DISCOVER_PATH = '/plugins/dsh-xdpool/aggregate/disco
  * would put a third-party directory on the critical path of the pool card.
  */
 export const POOL_CHANNELS_PATH = '/plugins/dsh-xdpool/channels'
+
+/**
+ * Per-channel usage order.
+ *
+ * `GET` answers every channel's effective strategy (its own override, or the pool-wide default);
+ * `POST { channel, strategy }` writes one. The channel page has no settings scope of its own, so
+ * this route is how it reads and writes — the alternative is a page that cannot change a control
+ * it displays.
+ */
+export const POOL_CHANNEL_USAGE_PATH = '/plugins/dsh-xdpool/channels/usage'
+
+/**
+ * The Doubao lane's session.
+ *
+ * POST starts an interactive browser sign-in and answers once it lands;
+ * GET reports whether a session is stored; DELETE forgets it.
+ */
+export const POOL_DOUBAO_SESSION_PATH = '/plugins/dsh-xdpool/doubao/session'
+
+/** The Doubao quota: the windows the account has, with their reset countdowns. */
+export const POOL_DOUBAO_QUOTA_PATH = '/plugins/dsh-xdpool/doubao/quota'
+
+/** The models the account may use, as the vendor publishes them. */
+export const POOL_DOUBAO_MODELS_PATH = '/plugins/dsh-xdpool/doubao/models'
+
+/** The account's credit tasks: what is waiting, and what has been collected. */
+export const POOL_DOUBAO_CAMPAIGN_PATH = '/plugins/dsh-xdpool/doubao/campaign'
+
+/** Collect every claimable task. */
+export const POOL_DOUBAO_CLAIM_PATH = '/plugins/dsh-xdpool/doubao/claim'
+
+/**
+ * Doubao's credit automation: read the switch, or turn it on and off.
+ *
+ * Doubao's points come from campaign tasks rather than a daily button, so automation here means
+ * "collect whatever is claimable, on a schedule" — the same promise WorkBuddy's automation
+ * makes, over a different mechanism.
+ */
+export const POOL_DOUBAO_AUTOMATION_PATH = '/plugins/dsh-xdpool/doubao/automation'
 /**
  * The `reason` the channel document carries when the login-channel route is
  * already owned by another plugin.
@@ -281,6 +405,11 @@ export const CHANNEL_PACK_METHODS: ReadonlySet<string> = new Set([
    */
   'account.reload',
   'account.refresh',
+  /**
+   * The pack has no preferred-account field: it walks the account array in order, so priority
+   * IS a reorder. Added when the channel cards gained the 「优先使用」 button.
+   */
+  'account.reorder',
   'account.test',
   'account.update',
   'credits.balances',
@@ -440,6 +569,19 @@ export interface PoolWebAggregateProvider {
    * vocabulary so both kinds of card present one idea one way.
    */
   distribution?: string
+  /**
+   * 注册表里写明的模型信息（显示名 / 识图 / 推理），按模型 id 索引。
+   *
+   * 只含注册表声明过的模型；「发现模型」拉回来的 id 不在这里，卡片对它们只显示 id。
+   * 聚合页的模型行和「选择模型」浮层用它显示模型名和标签。
+   */
+  modelMeta?: Readonly<Record<string, PoolWebAggregateModelMeta>>
+}
+/** 一个注册表模型的显示信息。字段缺省表示注册表没写。 */
+export interface PoolWebAggregateModelMeta {
+  name: string
+  vision?: boolean
+  reasoning?: boolean
 }
 /** The document {@link POOL_AGGREGATE_PATH} answers with. */
 export interface PoolWebAggregateStatus {
@@ -500,6 +642,8 @@ export interface PoolWebChannel {
    * the user reads the message.
    */
   smsHint?: boolean
+  /** A sentence shown beside the button, for a login that needs explaining. */
+  loginHint?: 'doubao' | 'marvis' | 'astudio' | 'magicrew' | 'accio' | 'qiniu' | 'monkeycode' | 'baizhi' | 'autoclaw'
   /**
    * What the pack can report about this vendor's credits, when it can report
    * something at all.
@@ -609,6 +753,8 @@ export interface PoolWebRelayPatch {
    * leaves the gateway open.
    */
   models?: string[]
+  /** 模型共享方式：'pool' 按账号池启用列表，'custom' 只放行 models。 */
+  modelsMode?: 'pool' | 'custom'
 }
 /**
  * What {@link POOL_RELAY_PATH} answers with.
@@ -635,6 +781,21 @@ export interface PoolWebRelayStatus {
   key: string
   /** Why nothing is bound; '' when there is nothing to explain. */
   error: string
+  /** 当前的模型共享方式；旧后端不返回这个字段。 */
+  modelsMode?: 'pool' | 'custom'
+  /**
+   * 网关转发了什么。
+   *
+   * 只统计真正转发出去的请求：被拒的（没开、密钥不对、路径不认）不计入。
+   * 这是这个进程自己的记账，重启归零 —— 界面上要写清，不然会被当成历史总量。
+   */
+  stats?: {
+    requests: number
+    failed: number
+    avgLatencyMs?: number
+    inputTokens: number
+    outputTokens: number
+  } | undefined
   /**
    * Every model the gateway could serve, with the name a human reads.
    *
@@ -1042,7 +1203,12 @@ export interface PoolWebStatus {
 export interface PoolWebSkippedFile {
   /** Basename only; the full path lives in the desktop app's auth directory. */
   file: string
-  reason: 'encrypted' | 'expired' | 'unreadable' | 'malformed'
+  /**
+   * `key-rotated` means the file is sealed under a key id no installed build produces
+   * (#178) — the vendor rotated the at-rest key. Starting the desktop app cannot fix it,
+   * which is why it is not folded into `encrypted`.
+   */
+  reason: 'encrypted' | 'key-rotated' | 'expired' | 'unreadable' | 'malformed'
 }
 /** How a region's model list was obtained. */
 export type PoolWebCatalogSource = 'live' | 'fallback'

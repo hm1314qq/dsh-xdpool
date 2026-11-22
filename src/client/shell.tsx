@@ -30,10 +30,15 @@
  *
  * @module dsh-xdpool/client/shell
  */
+import { POOL_NAV_ICON_MASK_URL } from './nav-icon.ts'
+import { UpdatePanel, type UpdateStatus } from './UpdatePanel.tsx'
+import { POOL_UPDATE_CHECK_PATH } from '../status-paths.ts'
+import { compareVersions } from '../update-check.ts'
+import type { ReactElement } from 'react'
+import { RAIL_ICONS, type RailIconName } from './rail-icons.ts'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import type { XdPoolSettingsKey } from './locales.ts'
-import { SHARED_CARD_CSS, SHELL_CSS } from './styles.ts'
 import { COMMUNITY_QR_QQ, COMMUNITY_QR_WECHAT } from './community-qr.ts'
 /** The translator the settings section injects. */
 type Translate = (key: XdPoolSettingsKey, params?: Record<string, unknown>) => string
@@ -49,6 +54,14 @@ export interface PoolShellProps {
   version?: string | undefined
   /** The user's avatar, as a data URI. */
   avatar: string
+  /**
+   * 两列还是三列。
+   *
+   * 设计稿只有账号池是「功能页 + 条目栏 + 详情」三列；
+   * 登录 / 聚合 / 看板 / 路由 / 网关 / 备份都是「功能页 + 内容」两列。
+   * 全用三列的话，那六页的 main 会落到第二列（264px），右边空出 936px。
+   */
+  wide?: boolean | undefined
   tabs: readonly ShellTab[]
   /** Id of the page on screen. */
   active: string
@@ -58,6 +71,10 @@ export interface PoolShellProps {
    * the page is for, and the card's copy is the only place that does.
    */
   hero?: ReactNode | undefined
+  /** 底部附加的行（侧栏入口开关等），挂在 .rail-foot 里。 */
+  links?: ReactNode | undefined
+  /** 页面脚注。 */
+  footer?: ReactNode | undefined
   children: ReactNode
 }
 /** localStorage key for the remembered page. */
@@ -77,6 +94,22 @@ function readRememberedTab(): string | undefined {
     return undefined
   }
 }
+export function rememberedShellTab(): string | undefined {
+  if (typeof window === 'undefined') return undefined
+  return window.localStorage.getItem(SHELL_TAB_KEY) ?? undefined
+}
+
+export function initialShellTab<T extends string>(
+  remembered: string | undefined,
+  tabs: readonly { id: T }[],
+): T | undefined {
+  // 记住的那个 id 必须真的在这份列表里 —— 换过版本之后它可能已经不存在，
+  // 那时回到第一个，而不是渲染一个空页。
+  const known = tabs.some(tab => tab.id === remembered)
+  // 空列表时返回 '' —— 调用方据此渲染空页，而不是崩
+  return known ? (remembered as T) : (tabs[0]?.id ?? ('' as T))
+}
+
 function rememberTab(id: string): void {
   try {
     window.localStorage.setItem(SHELL_TAB_KEY, id)
@@ -86,6 +119,14 @@ function rememberTab(id: string): void {
   }
 }
 /** A single statistic above the usage tables. */
+export function RailIcon({ name }: { name: RailIconName }): ReactElement {
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+      strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+      dangerouslySetInnerHTML={{ __html: RAIL_ICONS[name] }} />
+  )
+}
+
 export function KpiCard({
   label,
   value,
@@ -97,10 +138,10 @@ export function KpiCard({
   sub?: string | undefined
 }) {
   return (
-    <div className="dsm-xdpool-kpi dsm-xdpool-glass">
-      <span className="dsm-xdpool-kpi-label">{label}</span>
-      <span className="dsm-xdpool-kpi-value">{value}</span>
-      <span className="dsm-xdpool-kpi-sub">{sub ?? ''}</span>
+    <div className="sum-cell">
+      <span className="sum-k">{label}</span>
+      <span className="sum-v">{value}</span>
+      <span className="sum-sub">{sub ?? ''}</span>
     </div>
   )
 }
@@ -124,14 +165,14 @@ export function PageHero({
   pills?: ReactNode | undefined
 }) {
   return (
-    <div className="dsm-xdpool-hero dsm-xdpool-glass">
-      <div className="dsm-xdpool-pagehead">
-        <span className="dsm-xdpool-pagecopy">
-          <h2 className="dsm-xdpool-pagetitle">{title}</h2>
-          {sub === undefined || sub === '' ? null : <p className="dsm-xdpool-pagesub">{sub}</p>}
+    <div >
+      <div className="mhead">
+        <span className="mhead-title">
+          <h2 className="mhead-name">{title}</h2>
+          {sub === undefined || sub === '' ? null : <p className="mhead-org">{sub}</p>}
         </span>
-        {pills === undefined ? null : <div className="dsm-xdpool-pills">{pills}</div>}
-        {actions === undefined ? null : <div className="dsm-xdpool-pageactions">{actions}</div>}
+        {pills === undefined ? null : <div className="chip">{pills}</div>}
+        {actions === undefined ? null : <div className="mhead-actions">{actions}</div>}
       </div>
     </div>
   )
@@ -143,272 +184,315 @@ export function PageHero({
  * after that the parent is the only thing allowed to move the selection, so a
  * `storage` event from another window cannot fight a click in this one.
  */
+/** 浮层在 .app 里的位置（相对 .app 左上角）。 */
+interface PopAnchor {
+  left: number
+  top?: number
+  bottom?: number
+}
 export function PoolShell({
   t,
   version,
   avatar,
+  wide = false,
   tabs,
   active,
   onSelect,
   hero,
+  links,
+  footer,
   children,
 }: PoolShellProps) {
-  /** Measured box of the active tab's button, in tab-strip coordinates. */
-  const [glider, setGlider] = useState<{ left: number; top: number; width: number; height: number } | undefined>(undefined)
-  /** Whether the group-invite dialog is open. Local: nothing outside needs it. */
-  const [groupOpen, setGroupOpen] = useState(false)
   /**
-   * Close the dialog on Escape.
+   * 当前打开的浮层：检查更新 / 交流群，同一时间只开一个。
    *
-   * The overlay's own click handler covers the pointer, but a keyboard user who
-   * opened this with Enter has no other way out — and a modal with no key exit
-   * is a trap. Bound only while open, so the listener is not paid for on every
-   * page of a card that is mostly not showing a dialog.
+   * 两个浮层都用 position:absolute 钉在 .app 里、贴着触发按钮弹出（设计稿
+   * group.html / update.html 的写法是「贴着侧栏弹出，点外面关闭」）。
+   *
+   * 之前的坑：设计稿页面里的 .pop 是 position:relative（那是为了在示例页里居中），
+   * 提取进插件后覆盖了 app.css 的 absolute —— 交流群浮层作为 .app 的直接子元素
+   * 就占了一个网格格子，三列被挤成四块。现在位置写在 inline style 上，任何 CSS 都盖不掉。
+   */
+  const [pop, setPop] = useState<'update' | 'group' | undefined>(undefined)
+  const [popAt, setPopAt] = useState<PopAnchor | undefined>(undefined)
+  /**
+   * 后台悄悄查一次有没有新版（后端缓存 10 分钟，打开设置不会反复请求 npm）。
+   * 有新版就在版本号旁边亮一个绿点 —— 不弹窗、不打断，读者想更新时点一下就能一键更新。
+   */
+  const [latest, setLatest] = useState<string | undefined>(undefined)
+  useEffect(() => {
+    let live = true
+    void (async () => {
+      try {
+        const response = await fetch(POOL_UPDATE_CHECK_PATH, { credentials: 'same-origin' })
+        const body = await response.json().catch(() => undefined) as UpdateStatus | undefined
+        if (live && body?.error === undefined && typeof body?.latest === 'string') setLatest(body.latest)
+      } catch {
+        // 查不到就不亮点；点开小窗会再查一次并说清楚原因
+      }
+    })()
+    return () => { live = false }
+  }, [])
+  const hasUpdate = latest !== undefined && version !== undefined && version !== ''
+    && compareVersions(latest, version) > 0
+  const onUpdateStatus = useCallback((status: UpdateStatus): void => {
+    if (status.error === undefined && typeof status.latest === 'string') setLatest(status.latest)
+  }, [])
+  const appRef = useRef<HTMLDivElement | null>(null)
+  /**
+   * 插件自己的宽度档位（wide / mid / narrow / phone），写到 .app[data-w] 上。
+   *
+   * 按插件宽度而不是屏幕宽度：插件常开在 DSH 的设置对话框里，屏幕 1920 宽、插件只有
+   * 600 像素，按屏幕的 @media 永远不触发，三列硬挤，详情列文字一个字一行。
+   * 规则在 responsive-css.ts。
+   *
+   * 同时把 .app 的高度贴合到可见区域：原来写死 100vh，放进对话框后底部（点 Star /
+   * 交流群）被裁掉，外面还多出一条滚动条。
+   */
+  const [tier, setTier] = useState<'wide' | 'mid' | 'narrow' | 'phone'>('wide')
+  useLayoutEffect(() => {
+    const el = appRef.current
+    if (el === null || typeof window === 'undefined') return undefined
+    const measure = (): void => {
+      const box = el.getBoundingClientRect()
+      const width = box.width
+      if (width <= 0) return
+      setTier(width >= 1100 ? 'wide' : width >= 820 ? 'mid' : width >= 560 ? 'narrow' : 'phone')
+      // 往上找第一个会裁切 / 滚动的祖先，.app 的底边贴到它的可见底边
+      let parent = el.parentElement
+      for (let hops = 0; parent !== null && hops < 12; hops += 1) {
+        const overflow = window.getComputedStyle(parent).overflowY
+        if (overflow === 'auto' || overflow === 'scroll' || overflow === 'hidden') break
+        parent = parent.parentElement
+      }
+      const limit = parent === null
+        ? window.innerHeight
+        : Math.min(window.innerHeight,
+          parent.getBoundingClientRect().bottom - (Number.parseFloat(window.getComputedStyle(parent).paddingBottom) || 0))
+      const height = Math.floor(limit - box.top)
+      const next = height >= 360 ? `${String(height)}px` : ''
+      if (el.style.height !== next) el.style.height = next
+    }
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(() => { measure() })
+    observer?.observe(el)
+    if (el.parentElement !== null) observer?.observe(el.parentElement)
+    window.addEventListener('resize', measure)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [])
+  const popRef = useRef<HTMLDivElement | null>(null)
+  /** 按钮在 .app 坐标系里的位置 → 浮层放哪。 */
+  const anchorFrom = (target: HTMLElement, side: 'below' | 'beside'): PopAnchor => {
+    const box = appRef.current?.getBoundingClientRect()
+    const r = target.getBoundingClientRect()
+    const ox = box?.left ?? 0
+    const oy = box?.top ?? 0
+    const height = box?.height ?? window.innerHeight
+    const width = box?.width ?? window.innerWidth
+    // 小窗最宽 420，左边不许超出插件右边缘
+    const clampLeft = (left: number): number => Math.max(8, Math.min(left, width - 428))
+    // 版本号在下半屏（手机档的底部 dock）时往上弹，否则在它下面
+    if (side === 'below') {
+      return r.top - oy > height / 2
+        ? { left: clampLeft(r.left - ox), bottom: Math.max(8, height - (r.top - oy) + 6) }
+        : { left: clampLeft(r.left - ox), top: r.bottom - oy + 6 }
+    }
+    // 交流群：贴在功能页栏右边、底边对齐；手机档按钮在 dock 里时同样往上弹
+    if (r.right - ox > width - 40) return { left: clampLeft(r.left - ox), bottom: Math.max(8, height - (r.top - oy) + 6) }
+    return { left: clampLeft(r.right - ox + 8), bottom: Math.max(8, height - (r.bottom - oy)) }
+  }
+  const openPop = (which: 'update' | 'group', target: HTMLElement): void => {
+    if (pop === which) { setPop(undefined); return }
+    setPopAt(anchorFrom(target, which === 'update' ? 'below' : 'beside'))
+    setPop(which)
+  }
+  /**
+   * Close the dialog on Escape, or on a press outside it.
+   *
+   * The press must be OUTSIDE: the old listener closed on every mousedown,
+   * so clicking inside the dialog (selecting the invite text, pressing the
+   * update button) dismissed it before the click could land.
    */
   useEffect(() => {
-    if (!groupOpen) return undefined
+    if (pop === undefined) return undefined
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setGroupOpen(false)
+      if (event.key === 'Escape') setPop(undefined)
+    }
+    const onDown = (event: MouseEvent): void => {
+      const target = event.target as Node | null
+      if (target !== null && popRef.current?.contains(target) === true) return
+      // 触发按钮自己会切换开关，这里不抢
+      if (target instanceof Element && target.closest('[data-pop-trigger]') !== null) return
+      setPop(undefined)
     }
     window.addEventListener('keydown', onKey)
-    return () => { window.removeEventListener('keydown', onKey) }
-  }, [groupOpen])
-  const tabRefs = useRef(new Map<string, HTMLButtonElement | null>())
-  const tabsRef = useRef<HTMLDivElement | null>(null)
-  const measure = useCallback((): void => {
-    const strip = tabsRef.current
-    const button = tabRefs.current.get(active)
-    // A tab that has never been rendered (the caller switched to an id the
-    // list does not carry) has no box to copy; leaving the previous glider
-    // would highlight a page that is no longer on screen.
-    if (strip === null || button === null || button === undefined) {
-      setGlider(undefined)
-      return
+    window.addEventListener('mousedown', onDown)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('mousedown', onDown)
     }
-    setGlider({
-      left: button.offsetLeft,
-      top: button.offsetTop,
-      width: button.offsetWidth,
-      height: button.offsetHeight,
-    })
-  }, [active])
-  // Layout effect, not effect: the glider must not be painted at its default
-  // position for one frame on every tab change.
-  useLayoutEffect(measure, [measure, tabs])
-  useEffect(() => {
-    window.addEventListener('resize', measure)
-    return () => { window.removeEventListener('resize', measure) }
-  }, [measure])
+  }, [pop])
+  const popStyle = (width: number): CSSProperties => ({
+    position: 'absolute',
+    zIndex: 60,
+    width: `min(${String(width)}px, calc(100% - 32px))`,
+    left: popAt?.left ?? 16,
+    ...(popAt?.top === undefined ? {} : { top: popAt.top }),
+    ...(popAt?.bottom === undefined ? {} : { bottom: popAt.bottom }),
+    ...(popAt?.top === undefined && popAt?.bottom === undefined ? { top: 16 } : {}),
+  })
+  /** 品牌区，结构照设计稿的 .rail-brand。 */
+  const brand = (
+    <div className="rail-brand">
+      {/*
+        品牌 logo：有头像是头像，没有就用插件自己的图标。
+
+        设计稿的 .rail-logo 靠 --avatar 背景图；没有头像时它是空方块，
+        左上角会缺一块。这里给个兜底，两种情况下都是同一个 26px 圆角方块。
+      */}
+      <span
+        className="rail-logo"
+        style={{ backgroundImage: `url("${avatar === '' || avatar === undefined ? POOL_NAV_ICON_MASK_URL : avatar}")` }}
+      />
+      <span>
+        <div className="rail-name">{t?.('shell.brand') ?? 'XD Pool'}</div>
+        {version === undefined || version === '' ? null : (
+          /* 设计稿：版本号 + 一个刷新小圆圈，点开是「检查更新」小窗 */
+          <button type="button" className="rail-ver" data-pop-trigger="update"
+            title={hasUpdate ? `发现新版本 v${latest ?? ''}，点击更新` : '检查更新'}
+            aria-haspopup="dialog"
+            style={hasUpdate ? { color: 'var(--accent)', position: 'relative' } : { position: 'relative' }}
+            onClick={event => { openPop('update', event.currentTarget) }}>
+            v{version}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              <path d="M21 12a9 9 0 11-3-6.7M21 4v5h-5" />
+            </svg>
+            {hasUpdate ? (
+              <span aria-label="有新版本" style={{
+                width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)',
+                boxShadow: '0 0 0 2px var(--bg)', marginLeft: 1,
+              }} />
+            ) : null}
+          </button>
+        )}
+      </span>
+    </div>
+  )
+  const railRef = useRef<HTMLElement | null>(null)
   const select = useCallback((id: string): void => {
     rememberTab(id)
     onSelect(id)
   }, [onSelect])
+  const onKeyDown = useCallback((event: React.KeyboardEvent<HTMLElement>): void => {
+    const step = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0
+    if (step === 0) return
+    event.preventDefault()
+    const at = tabs.findIndex(tab => tab.id === active)
+    const next = tabs[(at + step + tabs.length) % tabs.length]
+    if (next !== undefined) select(next.id)
+  }, [active, select, tabs])
+
   return (
-    <div className="dsm-xdpool-shell">
-      {/*
-        Two sheets, in this order. Every page injects its own stylesheet from
-        inside this shell, so the shared primitives have to be declared here —
-        and first — or the page's own block would lose to them on equal
-        specificity. The shell is the only component every page renders inside,
-        which is what makes it the one place a shared rule can live.
-      */}
-      <style>{SHARED_CARD_CSS}</style>
-      <style>{SHELL_CSS}</style>
-      <div className="dsm-xdpool-aurora" aria-hidden="true">
-        <i />
-        <i />
-        <i />
-      </div>
-      <nav className="dsm-xdpool-nav">
-        <div className="dsm-xdpool-brand">
-          <img className="dsm-xdpool-avatar" src={avatar} alt="" />
-          <span className="dsm-xdpool-brand-copy">
-            <span className="dsm-xdpool-brand-title">
-              {t?.('shell.brand') ?? 'XD Pool'}
-              {version === undefined || version === ''
-                ? null
-                : <span className="dsm-xdpool-version">v{version}</span>}
-            </span>
-          </span>
-        </div>
-        <a
-          className="dsm-xdpool-star"
-          href="https://github.com/XDTrees/dsh-xdpool"
-          target="_blank"
-          rel="noreferrer"
-          title={t?.('shell.starHint') ?? 'Open this plugin on GitHub'}
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path
-              fill="currentColor"
-              d="M12 2.6l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3-5.8 3 1.1-6.5L2.6 9.4l6.5-.9z"
-            />
-          </svg>
-          <span>{t?.('shell.star') ?? 'Star on GitHub'}</span>
-        </a>
-        {/*
-          The group invite, next to the star and in the same slot.
-          
-          A `<button>`, not an `<a>`: this opens a dialog in place. Sending the
-          user to an external page to look at a picture is worse than showing
-          the picture — a WeChat group code has to be scanned from the screen
-          it is displayed on, and a new tab steals focus from the very device
-          doing the scanning.
-        */}
-        <button
-          type="button"
-          className="dsm-xdpool-star dsm-xdpool-group"
-          title={t?.('shell.groupHint') ?? '扫码加入 XD 交流群'}
-          onClick={() => { setGroupOpen(true) }}
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            {/* Two overlapping speech bubbles: the WeChat-group read at 15px,
-                without copying the trademark's exact silhouette. */}
-            <path
-              fill="currentColor"
-              d="M9.1 3.4c-3.6 0-6.5 2.4-6.5 5.4 0 1.7 1 3.2 2.6 4.2l-.7 2.1 2.4-1.2c.7.2 1.4.3 2.2.3h.4a5.6 5.6 0 0 1-.2-1.5c0-3 2.9-5.4 6.5-5.4h.5C15.7 5.1 12.7 3.4 9.1 3.4zm-2.3 2.9a.9.9 0 1 1 0 1.8.9.9 0 0 1 0-1.8zm4.6 0a.9.9 0 1 1 0 1.8.9.9 0 0 1 0-1.8z"
-            />
-            <path
-              fill="currentColor"
-              d="M21.4 12.7c0-2.5-2.4-4.5-5.4-4.5s-5.4 2-5.4 4.5 2.4 4.5 5.4 4.5c.6 0 1.2-.1 1.8-.2l2 1-.6-1.7c1.4-.9 2.2-2.2 2.2-3.6zm-7.2-1.4a.8.8 0 1 1 0 1.6.8.8 0 0 1 0-1.6zm3.6 0a.8.8 0 1 1 0 1.6.8.8 0 0 1 0-1.6z"
-            />
-          </svg>
-          <span>{t?.('shell.group') ?? '交流群'}</span>
-        </button>
-        <div className="dsm-xdpool-navtabs" role="tablist" ref={tabsRef}>
-          {glider === undefined ? null
-            : <span
-                className="dsm-xdpool-navglider"
-                style={{
-                  transform: `translate(${String(glider.left)}px, ${String(glider.top)}px)`,
-                  width: `${String(glider.width)}px`,
-                  height: `${String(glider.height)}px`,
-                }}
-              />}
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={tab.id === active}
-              ref={(element) => { tabRefs.current.set(tab.id, element) }}
-              className={`dsm-xdpool-navtab${tab.id === active ? ' dsm-xdpool-navtab-on' : ''}`}
-              onClick={() => { select(tab.id) }}
-            >
-              {tab.label}
-              {tab.num === undefined ? null : <span className="dsm-xdpool-navtabnum">{tab.num}</span>}
-            </button>
-          ))}
+    <div ref={appRef} className={wide ? 'app app-wide' : 'app'} data-w={tier} style={{ position: 'relative' }}>
+      <nav className="rail" aria-label={'Pages'} ref={railRef} onKeyDown={onKeyDown}>
+        {brand}
+        {tabs.map(tab => (
+          /*
+            选中态：设计稿的 CSS 认的是 aria-current="page"（左侧竖条 + 图标变绿）。
+            之前只写了 aria-selected，于是左栏永远没有选中高亮。
+          */
+          <button
+            key={tab.id}
+            type="button"
+            className="rail-item"
+            title={tab.label}
+            aria-current={tab.id === active ? 'page' : undefined}
+            onClick={() => { select(tab.id) }}
+          >
+            {RAIL_ICONS[tab.id as RailIconName] === undefined ? null : (
+              <RailIcon name={tab.id as RailIconName} />
+            )}
+            <span>{tab.label}</span>
+          </button>
+        ))}
+        <div className="rail-foot">
+          <a className="rail-item" href="https://github.com/XDTrees/dsh-xdpool" target="_blank" rel="noreferrer"
+            title={t?.('shell.starHint') ?? 'Open this plugin on GitHub'}>
+            <RailIcon name="star" />
+            <span>{t?.('shell.star') ?? '点 Star'}</span>
+          </a>
+          <button type="button" className="rail-item" data-pop-trigger="group"
+            title={t?.('shell.groupHint') ?? '扫码加入 XD 交流群'}
+            aria-haspopup="dialog"
+            aria-expanded={pop === 'group'}
+            onClick={event => { openPop('group', event.currentTarget) }}>
+            <RailIcon name="group" />
+            <span>{t?.('shell.group') ?? '交流群'}</span>
+          </button>
+          {links}
         </div>
       </nav>
-      {/*
-        The group invite, expanded IN PLACE under the tab strip.
 
-        History of getting this wrong twice:
-
-        1. `position:absolute; inset:0` against `.dsm-xdpool-shell` — but the shell is
-           a column of every panel on the page, so the overlay spanned the page's whole
-           scroll height and `align-items:center` put the dialog half-way down it.
-        2. `position:fixed` centred in the viewport — technically a correct modal, but
-           not what was asked for: the reader wanted the codes to appear WHERE the
-           button sits, not as a scrim over everything.
-
-        So it is now a normal flow element directly under the nav: no overlay, no
-        centring, nothing to scroll past. Opening it pushes the panels below down by
-        its own height, which is the behaviour of every other disclosure on this card
-        and the only one that puts the answer next to the question.
-      */}
-      {!groupOpen ? null : (
-        <div
-          className="dsm-xdpool-groupinline"
-          role="dialog"
-          aria-modal="false"
-          aria-label={t?.('shell.groupTitle') ?? 'XD 交流群'}
-        >
-          <div className="dsm-xdpool-groupcard">
-            <div className="dsm-xdpool-groupcardhead">
-              <b>{t?.('shell.groupTitle') ?? 'XD 交流群'}</b>
-              <button
-                type="button"
-                className="dsm-xdpool-groupclose"
-                aria-label={t?.('shell.groupClose') ?? '关闭'}
-                onClick={() => { setGroupOpen(false) }}
-              >
-                ×
-              </button>
-            </div>
-            {/*
-              Two codes, side by side, because they are joined in two different
-              ways and one caption cannot describe both:
-
-                - WeChat is a BOT's personal code: scanning only adds the bot,
-                  and the user must then send `XD` before being pulled in. A
-                  reader who scans and waits sees nothing happen, so the step is
-                  printed right under that code rather than in a footnote.
-                - QQ is the group's own code: scanning IS joining.
-
-              `alt` carries the instruction rather than a description: a screen
-              reader user cannot scan a code, so "what to do" is the only useful
-              thing to say. The design is column-flowing so the panel stays one
-              dialog on a narrow settings pane instead of two stacked screens.
-            */}
-            <div className="dsm-xdpool-groupcodes">
-              <div className="dsm-xdpool-groupcode">
-                <img
-                  className="dsm-xdpool-groupqr"
-                  src={COMMUNITY_QR_WECHAT}
-                  alt={t?.('shell.groupWechatAlt') ?? '微信机器人二维码：扫码添加后发送 XD，即可被拉进群'}
-                  width={220}
-                  height={220}
-                />
-                <span className="dsm-xdpool-groupcode-label">
-                  {t?.('shell.groupWechat') ?? '微信（机器人）'}
-                </span>
-                <span className="dsm-xdpool-groupcode-step">
-                  {t?.('shell.groupWechatStep') ?? '扫码添加机器人后，发送「XD」拉你进群'}
-                </span>
-              </div>
-              <div className="dsm-xdpool-groupcode">
-                <img
-                  className="dsm-xdpool-groupqr"
-                  src={COMMUNITY_QR_QQ}
-                  alt={t?.('shell.groupQqAlt') ?? 'QQ 群二维码：直接扫码加入 XD 交流群'}
-                  width={220}
-                  height={220}
-                />
-                <span className="dsm-xdpool-groupcode-label">
-                  {t?.('shell.groupQq') ?? 'QQ 群'}
-                </span>
-                <span className="dsm-xdpool-groupcode-step">
-                  {t?.('shell.groupQqStep') ?? '直接扫码即可加入'}
-                </span>
-              </div>
-            </div>
-            <p className="dsm-xdpool-groupnote">
-              {t?.('shell.groupNote')
-                ?? '两个群都在；哪个方便用哪个。二维码失效了在 GitHub 提 issue 说一声，会更新。'}
-            </p>
+      {pop !== 'update' ? null : (
+        <div ref={popRef} className="pop" role="dialog" aria-label={t?.('update.title') ?? '检查更新'}
+          style={popStyle(360)}>
+          <div className="pop-head">
+            <span className="pop-name">{t?.('update.title') ?? '检查更新'}</span>
+            <button type="button" className="pop-close"
+              aria-label={t?.('shell.groupClose') ?? '关闭'}
+              onClick={() => { setPop(undefined) }}>×</button>
           </div>
+          <UpdatePanel t={t} clientVersion={version} onStatus={onUpdateStatus}
+            onClose={() => { setPop(undefined) }} />
         </div>
       )}
-      {hero === undefined ? null : hero}
-      <div className="dsm-xdpool-body">{children}</div>
+
+      {pop !== 'group' ? null : (
+        <div ref={popRef} className="pop" role="dialog" aria-modal="false"
+          aria-label={t?.('shell.groupTitle') ?? 'XD 交流群'}
+          style={popStyle(420)}>
+          <div className="pop-head">
+            <span className="pop-name">{t?.('shell.groupTitle') ?? 'XD 交流群'}</span>
+            <button type="button" className="pop-close"
+              aria-label={t?.('shell.groupClose') ?? '关闭'}
+              onClick={() => { setPop(undefined) }}>×</button>
+          </div>
+          <div className="qr-grid">
+            <div className="qr-item">
+              <img className="qr" src={COMMUNITY_QR_WECHAT}
+                alt="微信机器人二维码：扫码添加后发送 XD，即可被拉进群"
+                width={220} height={220} />
+              <span className="qr-label">微信（机器人）</span>
+              <span className="qr-step">扫码添加机器人后，发送「XD」拉你进群</span>
+            </div>
+            <div className="qr-item">
+              <img className="qr" src={COMMUNITY_QR_QQ}
+                alt="QQ 群二维码：直接扫码加入 XD 交流群"
+                width={220} height={220} />
+              <span className="qr-label">QQ 群</span>
+              <span className="qr-step">直接扫码即可加入</span>
+            </div>
+          </div>
+          <p className="note">
+            {t?.('shell.groupNote') ?? '两个群都在；哪个方便用哪个。'}
+          </p>
+        </div>
+      )}
+
+      {/*
+        .app 的直接子元素必须正好是 rail / list / main（浮层是 absolute，不占格子）。
+        这一层 display:contents 不参与布局，只承载 dsm-xdpool-body 这个测试锚点。
+        hero 与 children 都放进这一层：任何一个留在 .app 的直接子层，
+        就会自己占掉一整列 —— 三列网格会因此多出格子，整页塌成一片。
+      */}
+      <div className="dsm-xdpool-body" style={{ display: 'contents' }}>
+        {hero}
+        {children}
+      </div>
+      {footer}
     </div>
   )
-}
-/**
- * Pick the initial page from a remembered id, the tab list and a fallback.
- *
- * Exported so the parent can run exactly the same check while hydrating: a
- * remembered id that this build no longer carries must land on the first tab
- * instead of rendering a page whose component does not exist.
- */
-export function initialShellTab(remembered: string | undefined, tabs: readonly ShellTab[]): string {
-  const first = tabs[0]?.id
-  if (first === undefined) return ''
-  return remembered !== undefined && tabs.some(tab => tab.id === remembered) ? remembered : first
-}
-/** Read the remembered page id, tolerating storage being unavailable. */
-export function rememberedShellTab(): string | undefined {
-  return typeof window === 'undefined' ? undefined : readRememberedTab()
 }

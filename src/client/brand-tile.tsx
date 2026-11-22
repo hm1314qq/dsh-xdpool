@@ -88,6 +88,14 @@ export interface BrandTileProps {
   readonly initials?: string | undefined
   /** Extra class names, so a caller can place the tile without a wrapper. */
   readonly className?: string | undefined
+  /**
+   * 边长（px），不传就是设计稿 .ch-logo 的默认尺寸。
+   *
+   * 聚合渠道的 .vd-head 是一行小字（13px 名称 + 类别胶囊），默认的 32px 方块
+   * 会把卡片头撑高一倍；那里传 20。尺寸写在 inline style 上，不新增 CSS ——
+   * 设计稿样式是提取生成的，插件这边不改它。
+   */
+  readonly size?: number | undefined
 }
 
 /**
@@ -114,16 +122,32 @@ function tileInitials(value: string | undefined): string | undefined {
  * inline `background`, because the gradient has to be composed with a neutral
  * underlay — see decision 3 in the module header.
  */
-export function BrandTile({ accent, glyph, icon, initials, className }: BrandTileProps): ReactElement {
+export function BrandTile({ accent, glyph, icon, initials, className, size }: BrandTileProps): ReactElement {
   const letters = icon === undefined ? tileInitials(initials) : undefined
   return (
     <span
       aria-hidden="true"
-      className={`dsm-xdpool-tile${icon === undefined ? '' : ' dsm-xdpool-tile-art'}${letters === undefined ? '' : ' dsm-xdpool-tile-letters'}${className === undefined ? '' : ` ${className}`}`}
+      className={`ch-logo${icon === undefined ? ' ch-logo-letters' : ' ch-logo-art'}${className === undefined ? '' : ` ${className}`}`}
+      /*
+        有图标时才挂 ch-logo-art —— 只挂字母版会把图标的位置留空。
+        这个判断和上面那个是两件事：上面决定「字母还是图标」，这里决定「图标层要不要」。
+      */
+      data-logo={icon === undefined ? '' : ' ch-logo-art'}
       style={{
-        '--dsm-xdpool-tile-accent': accent,
-        '--dsm-xdpool-tile-glyph': letters === undefined ? BRAND_TILE_GLYPHS[glyph] : 'none',
-        '--dsm-xdpool-tile-icon': icon === undefined ? 'none' : `url("${icon}")`,
+        '--ch-logo-accent': accent,
+        '--ch-logo-glyph': letters === undefined ? BRAND_TILE_GLYPHS[glyph] : 'none',
+        '--ch-logo-icon': icon === undefined ? 'none'
+          /* css:--icon-xxx 是「用设计稿的 CSS 变量」，不是 data URI */
+          : icon.startsWith('css:') ? `var(${icon.slice(4)})`
+            : `url("${icon}")`,
+        ...size === undefined ? {} : {
+          width: `${String(size)}px`,
+          height: `${String(size)}px`,
+          flex: `0 0 ${String(size)}px`,
+          borderRadius: size <= 24 ? '5px' : 'var(--r-md)',
+          // 字母版在小方块里要跟着缩，否则两个字母会顶出边
+          fontSize: `${String(Math.max(9, Math.round(size * 0.42)))}px`,
+        },
       } as Record<string, string>}
     >
       {letters}

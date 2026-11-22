@@ -50,9 +50,24 @@ describe('a rejected directory entry cannot take the adapters down with it', () 
     const block = registrationBlock()
     const adapterCalls = block.match(/ctx\.llm\.registerAdapter\(/g) ?? []
     const directoryCall = block.match(/ctx\.llm\.registerConfigurableProviders\(/g) ?? []
-    // Four providers now: the two pool lanes, the aggregate lane and the
-    // credential-free lane. All four in the adapters try, the directory after.
-    expect(adapterCalls).toHaveLength(4)
+    /**
+     * Thirteen providers: the two region pools, the aggregate lane, the credential-free lane,
+     * Doubao, Marvis, AStudio, and MagiCrew's two sites.
+     *
+     * The region registrations were removed in 2.7.2 to de-duplicate the picker, on the theory
+     * that the pack's `buddy` / `workbuddy` lanes served the same accounts. They do not — those
+     * read the PACK's pool, which is empty for an account discovered from the desktop client — so
+     * removing these made such an account's models disappear (2.7.7 restores them). The duplicate
+     * groups are removed the other way: the pack's lanes stand aside via
+     * `DSH_XDPOOL_OWNS_POOL_LANES`.
+     *
+     * The two pool lanes used to register here as well, under ids `xdpool` / `xdpool-global`,
+     * while the scan-login lanes registered `buddy` / `workbuddy` — two idents for one account
+     * pool, which is what put four groups in the model picker (#148). Their adapters are still
+     * built and still serve the loopback shims; only the duplicate listing entry is gone, so
+     * the count here drops to two.
+     */
+    expect(adapterCalls).toHaveLength(13)
     expect(directoryCall).toHaveLength(1)
     // The four adapter calls must all precede the directory call: the adapters
     // have to be LIVE before the directory is offered, so a directory rejection

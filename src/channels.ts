@@ -1,7 +1,10 @@
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { ROUTE_OWNED_ELSEWHERE } from './status-paths.ts'
+import { REGISTERED_CHANNELS as ROSTER } from './channel-roster.ts'
+import { publishChannelUsage } from './channel-usage.ts'
 /**
  * Mount the vendored free-channel pack.
  *
@@ -65,6 +68,7 @@ export type ChannelProviderId =
   | 'minimax'
   | 'zcode'
   | 'gemini'
+  | 'doubao'
 export interface ChannelDescriptor {
   id: ChannelProviderId
   name: string
@@ -112,6 +116,13 @@ export interface ChannelDescriptor {
    */
   smsHint?: boolean
   /**
+   * A sentence shown beside the sign-in button, for a channel whose login needs explaining.
+   *
+   * Doubao has no QR endpoint to poll (the vendor closed it), so the button opens a browser
+   * window instead — and a user who is not told that will read the empty panel as a failure.
+   */
+  loginHint?: 'doubao'
+  /**
    * What the pack can tell us about this vendor's credits.
    *
    * Presence of the field is itself the answer: it means `credits.balances`
@@ -153,148 +164,36 @@ export interface ChannelDescriptor {
  * a number: a quota we guessed would be the one number on the card a user would
  * plan their day around.
  */
-export const REGISTERED_CHANNELS: readonly ChannelDescriptor[] = [
-  {
-    id: 'codearts',
-    name: 'CodeArts',
-    org: '华为云',
-    accent: '#C7000B',
-    note: '已开通免费体验套餐，自动续期不收费；新人积分 + DeepSeek · GLM · openPangu 每日免费额度',
-    login: 'browser',
-    credits: { claim: true },
-  },
-  {
-    id: 'buddy',
-    name: 'WorkBuddy 国内版',
-    org: '腾讯',
-    domain: 'copilot.tencent.com',
-    accent: '#0A7AFF',
-    note: '与 CodeBuddy 共用端点：DeepSeek · Kimi · GLM 免费线，每日赠送积分',
-    login: 'browser',
-    credits: { claim: true, status: true },
-  },
-  {
-    id: 'workbuddy',
-    name: 'WorkBuddy 国际版',
-    org: '腾讯',
-    domain: 'www.workbuddy.ai',
-    accent: '#0B63CE',
-    note: '独立端点与账号体系，积分与国内版不互通；国际版后端没有每日签到接口',
-    login: 'browser',
-    credits: { status: true },
-  },
-  {
-    id: 'lobsterai',
-    name: 'LobsterAI',
-    org: '有道',
-    accent: '#FF6A00',
-    note: '每日签到领积分，积分换模型调用额度',
-    login: 'browser',
-    credits: { claim: true },
-  },
-  {
-    id: 'qoder',
-    name: 'Qoder 国际版',
-    org: '阿里云',
-    accent: '#615CED',
-    note: '每日 100 Credits，加密推理端点',
-    login: 'browser',
-    credits: { claim: true },
-  },
-  {
-    id: 'qodercn',
-    name: 'Qoder 国内版',
-    org: '阿里云',
-    accent: '#7A6CF0',
-    note: '每日 100 Credits，国内端点与模型池',
-    login: 'browser',
-    credits: { claim: true },
-  },
-  {
-    id: 'trae',
-    name: 'TRAE',
-    org: '字节跳动',
-    accent: '#00BFA6',
-    note: '手机号注册即送免费额度，按天重置',
-    login: 'browser',
-    credits: { claim: true },
-  },
-  {
-    id: 'cline',
-    name: 'Cline',
-    org: 'Cline Bot',
-    accent: '#5B5BD6',
-    note: '绑定 GitHub 账号后送美元计价的免费额度；其后端没有每日签到接口',
-    login: 'browser',
-    // US dollars, not credits — the pack scales Cline's balance by its own
-    // factor, so a "credits" label here would be a unit error, not a rounding.
-    credits: { unit: 'dollars' },
-  },
-  {
-    id: 'loomy',
-    name: 'Loomy',
-    org: '讯飞星火',
-    accent: '#2F6BFF',
-    note: '星火模型每日免费额度，扫码或手机号均可登录',
-    login: 'browser',
-    credits: { claim: true },
-  },
-  {
-    id: 'raccoon',
-    name: 'Raccoon',
-    org: '商汤',
-    accent: '#00A6A6',
-    note: '手机号注册即送免费额度；每日积分由服务端自动发放，登录奖励需在「新手任务」领取',
-    login: 'browser',
-    smsHint: true,
-    /**
-     * `credits: {}` is deliberate and does NOT mean "nothing to collect".
-     *
-     * Raccoon pays two different things and they arrive two different ways:
-     *
-     *   - the DAILY points are credited by the server on its own schedule, so
-     *     there is no check-in call to make. `credits.claimAll` answers "不支持每日
-     *     签到" for this channel, and that answer is correct;
-     *   - the DESKTOP LOGIN BONUS is a one-off, per account, and it is collectable
-     *     — through `onboarding.claim`, not through the daily claim.
-     *
-     * The empty object is what keeps the daily "Claim credits" button off this card
-     * (pressing it would only ever print that refusal). The login bonus has its own
-     * button, which the card draws for the channels in `ONBOARDING_CHANNELS`.
-     * `credits` staying present keeps the balance row on the card.
-     */
-    credits: {},
-  },
-  {
-    id: 'minimax',
-    name: 'MiniMax Code',
-    org: 'MiniMax',
-    accent: '#E4007F',
-    note: '设备码 + PKCE 登录，每日签到领额度',
-    login: 'browser',
-    credits: { claim: true, status: true },
-  },
-  {
-    id: 'zcode',
-    name: 'ZCode',
-    org: '智谱',
-    accent: '#3B6EF6',
-    note: 'GLM 模型按 token 计免费额度，需本机可开浏览器',
-    login: 'browser',
-    credits: { claim: true, unit: 'tokens' },
-  },
-  {
-    id: 'gemini',
-    name: 'Gemini Code Assist',
-    org: 'Google',
-    accent: '#4285F4',
-    note: '个人 Google 账号的免费配额，走本地回调 OAuth',
-    login: 'browser',
-    // Quota, not credits: Gemini reports percentage windows, so a total is
-    // the wrong number to print even though the pack returns one.
-    credits: { quota: true },
-  },
-]
+/**
+ * The roster lives in `channel-roster.ts`, which has no imports.
+ *
+ * It moved because the card needs the same names before the host answers, and the card runs in
+ * the browser: importing them from here — a module that reads the filesystem to find the pack —
+ * put `node:fs` in the client bundle, which does not load at all.
+ */
+/**
+ * Whether this plugin's own account pool has anything in it.
+ *
+ * Read from the store rather than from a service, because this runs while the pack is being
+ * mounted — before the rest of the plugin graph is necessarily up — and the answer decides
+ * whether the pack's `buddy` / `workbuddy` lanes list themselves. An empty pool means they must:
+ * they are then the only lanes that can serve anything.
+ */
+function poolHoldsAccounts(): boolean {
+  try {
+    const store = join(process.env['DSH_HOME'] ?? join(homedir(), '.dsh'), '.xdpool', 'accounts.json')
+    if (!existsSync(store)) return false
+    const parsed = JSON.parse(readFileSync(store, 'utf8')) as unknown
+    const rows = Array.isArray(parsed)
+      ? parsed
+      : (parsed as { accounts?: unknown } | null)?.accounts
+    return Array.isArray(rows) && rows.length > 0
+  } catch {
+    return false
+  }
+}
+
+export const REGISTERED_CHANNELS: readonly ChannelDescriptor[] = ROSTER as readonly ChannelDescriptor[]
 /**
  * The two channels this plugin already serves from its own account pool.
  *
@@ -386,6 +285,32 @@ export function mountChannelPack(ctx: unknown, logger?: ChannelPackLogger): Moun
       // would otherwise register an OpenCode account lane with no way to reach
       // it, and its `account.create` for that provider would fail at the point
       // where a user is waiting on a login.
+      /**
+       * Tell the pack which lanes this plugin serves (2.7.7).
+       *
+       * Both register adapters for the same two account pools: this plugin under `xdpool` /
+       * `xdpool-global` (its own pool, which is where a desktop-discovered account lives) and
+       * the pack under `buddy` / `workbuddy` (its own pool, empty in that case). Listing both is
+       * what produced four picker groups; dropping this plugin's two is what made those
+       * accounts' models disappear entirely.
+       *
+       * So the plugin keeps its registrations and the pack's lanes stand aside — decided HERE,
+       * at mount, because only this side knows whether it holds accounts.
+       *
+       * The decision is read from the pool rather than assumed: a machine where nobody signed
+       * into either lane must still get the pack's own listing, since that is the only one that
+       * can work there.
+       */
+      if (poolHoldsAccounts()) process.env['DSH_XDPOOL_OWNS_POOL_LANES'] = 'buddy,workbuddy'
+      else delete process.env['DSH_XDPOOL_OWNS_POOL_LANES']
+      /**
+       * The per-channel usage strategies, handed to the pack.
+       *
+       * The channel page's 「账号使用方式」 writes these; the pack's `getAvailableAccount` reads
+       * them when it picks an account. Passing them through the environment is what lets the
+       * pane work on the accounts the pack holds — which, for a scan login, is all of them.
+       */
+      publishChannelUsage()
       pack.apply(ctx, { disableOpencode: true })
       state = { state: 'ready', providers: REGISTERED_CHANNELS.length }
       logger?.info?.(`[xdpool] free-channel pack mounted (${REGISTERED_CHANNELS.length} login channels)`)
@@ -486,6 +411,14 @@ export interface ChannelAccount {
   expiresAt?: number
   /** Whether the pack can renew this credential without a new login. */
   refreshable?: boolean
+  /**
+   * 这个账号是不是账号池的首选。
+   *
+   * 首选是**整个池**的属性（下一次请求优先用它），不是某个渠道的 ——
+   * 后端把它放在 `/plugins/dsh-xdpool/accounts/preferred` 上。
+   * `account.list` 回来时会带上这个标记。
+   */
+  preferred?: boolean
 }
 /** What `apply` and `inject` look like on the bundle. */
 export interface ChannelPackLogger {

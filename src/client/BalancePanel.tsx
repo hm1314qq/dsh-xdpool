@@ -170,7 +170,7 @@ export function BalancePanel({ t }: { readonly t?: Translate | undefined }): Rea
   }, [load])
 
   const totals = useMemo(() => {
-    const accounts = channels.reduce((sum, row) => sum + row.accounts.length, 0)
+    const accounts = channels.reduce((sum, row) => sum + (row.accounts ?? []).length, 0)
     const credits = channels.reduce((sum, row) => sum + row.total, 0)
     return { accounts, credits }
   }, [channels])
@@ -187,7 +187,7 @@ export function BalancePanel({ t }: { readonly t?: Translate | undefined }): Rea
   }
 
   return (
-    <div className="dsm-xdpool-bal">
+    <div className="strip">
       <div className="dsm-xdpool-bal-head">
         <span className="dsm-xdpool-bal-title">{t?.('bal.title') ?? '渠道积分'}</span>
         <button
@@ -216,35 +216,35 @@ export function BalancePanel({ t }: { readonly t?: Translate | undefined }): Rea
                 <span className="dsm-xdpool-bal-name">{row.name}</span>
                 {/* Account count, then the balance: the count explains how the total
                     was reached, which is the question a bare number invites. */}
-                <span className="dsm-xdpool-bal-count">{compact(row.accounts.length)}</span>
+                <span className="dsm-xdpool-bal-count">{compact((row.accounts ?? []).length)}</span>
                 <span className="dsm-xdpool-bal-total">{grouped(row.total)}</span>
                 <span className="dsm-xdpool-bal-star" data-on={row.preferred ? 'true' : 'false'}>★</span>
-                <span className="dsm-xdpool-bal-caret" aria-hidden="true">{expanded ? '⌄' : '›'}</span>
+                <span className="strip-caret" aria-hidden="true">{expanded ? '⌄' : '›'}</span>
               </button>
               {!expanded ? null : (
-                <div className="dsm-xdpool-bal-accounts">
+                <div className="facts">
                   {row.accounts.map(account => (
-                    <div className="dsm-xdpool-bal-account" key={account.id}>
-                      <span className="dsm-xdpool-bal-account-name">{account.label}</span>
-                      <span className="dsm-xdpool-bal-account-total">{grouped(account.total)}</span>
-                      {account.packages.length === 0 ? null : (
+                    <div className="ch" key={account.id}>
+                      <span className="ch-name">{account.label}</span>
+                      <span className="td-num">{grouped(account.total)}</span>
+                      {(account.packages ?? []).length === 0 ? null : (
                         <div className="dsm-xdpool-bal-packs">
                           {/* Each package shows remain/size: a pack that is 100/100 is
                               untouched, and one at 5/500 is the one to spend first. */}
-                          {account.packages.slice(0, 6).map((pack, index) => (
-                            <div className="dsm-xdpool-bal-pack" key={`${pack.packageName}-${String(index)}`}>
-                              <span className="dsm-xdpool-bal-pack-name">{pack.packageName}</span>
+                          {(account.packages ?? []).slice(0, 6).map((pack, index) => (
+                            <div className="fact" key={`${pack.packageName}-${String(index)}`}>
+                              <span className="td-name">{pack.packageName}</span>
                               <span className="dsm-xdpool-bal-pack-amount">
                                 {grouped(pack.remain)}{pack.size > 0 ? ` / ${grouped(pack.size)}` : ''}
                               </span>
                             </div>
                           ))}
-                          {account.packages.length > 6
+                          {(account.packages ?? []).length > 6
                             ? (
-                              <div className="dsm-xdpool-bal-pack">
-                                <span className="dsm-xdpool-bal-pack-name">
-                                  {t?.('bal.morePacks', { count: account.packages.length - 6 })
-                                    ?? `还有 ${String(account.packages.length - 6)} 个包`}
+                              <div className="fact">
+                                <span className="td-name">
+                                  {t?.('bal.morePacks', { count: (account.packages ?? []).length - 6 })
+                                    ?? `还有 ${String((account.packages ?? []).length - 6)} 个包`}
                                 </span>
                               </div>
                             )

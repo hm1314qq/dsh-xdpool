@@ -30,6 +30,7 @@ import {
   resolveComboMember,
   type ComboMember,
   type ComboModelRow,
+  type HostModelRow,
 } from './combos.ts'
 import type { AggregateStore } from './store.ts'
 import { paidAlternativeFor } from './siblings.ts'
@@ -200,6 +201,18 @@ export interface WorkBuddyShimOptions {
    */
   usageRecorder?: UsageRecorder
   /**
+   * The scan-login channel rows, for chain members that name one — issue #177.
+   *
+   * A chain may mix pool models, aggregate models and channel models. Without this the channel
+   * half resolved to undefined and was silently dropped, so a chain of only channel members
+   * reached the executor with zero members and answered `combo_missing` — while the routing page
+   * showed the same chain as valid.
+   *
+   * Injected rather than imported: the lane is async and owns its own 60s cache, and this shim
+   * must not build one.
+   */
+  hostRows?: () => Promise<readonly HostModelRow[]>
+  /**
    * The second lane: providers the user holds a key for.
    *
    * Attached to the CN shim only. The aggregate lane is gateway-independent — it
@@ -275,6 +288,9 @@ const KIND_STATUS: Readonly<Record<UpstreamErrorKind, number>> = {
   hard_credit: 402,
   soft_rate: 429,
   session_dead: 401,
+  // The upstream's own status: the account is flagged, and a client must not read this as
+  // "your key is wrong" and retry with the same credential forever.
+  risk_blocked: 403,
   not_found: 502,
   server: 502,
   client: 400,
@@ -1082,6 +1098,11 @@ function withBareModelId(raw: string, modelId: string): string {
     const sources = {
       pool: catalog.current(),
       aggregate: aggregate === undefined ? [] : aggregate.catalog.providerRows(),
+      /**
+       * Resolved per call, not cached here: the lane already caches its rows for 60 seconds,
+       * and a second cache would make a just-signed-in channel invisible for a minute.
+       */
+      host: await (options.hostRows?.() ?? Promise.resolve([])),
     }
     const members = comboChain(row)
       .map(modelId => resolveComboMember(modelId, sources))
@@ -1316,6 +1337,9 @@ function withBareModelId(raw: string, modelId: string): string {
         last = { kind: result.kind, status: result.status, message: result.message }
         if (result.kind === 'soft_rate') pool.penalize(account.id, parseRateLimitReset(result.message), member.modelId)
         else if (result.kind === 'session_dead') pool.penalizeCredentialDead(account.id)
+        // A flagged account is not a dead one: refreshing its token changes nothing, so the
+        // pool cools it and moves on rather than retrying the same credential (issue #127).
+        else if (result.kind === 'risk_blocked') pool.penalize(account.id, 30 * 60_000, member.modelId)
         else if (result.kind === 'hard_credit') pool.penalizeExhausted(account.id)
         noteSwitch(member.modelId, result.kind, result.status)
         continue
