@@ -45,6 +45,7 @@ import {
   POOL_CATALOG_REFRESH_PATH,
   POOL_CREDIT_RESERVE_PATH,
   POOL_CHANNELS_PATH,
+  POOL_CHANNEL_USAGE_PATH,
   POOL_CHANNEL_MODELS_PATH,
   POOL_CHECKIN_PATH,
   POOL_COMBOS_PATH,
@@ -1296,6 +1297,67 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
         }
       },
     })
+    /**
+     * How each channel picks its account, and the pool-wide default.
+     *
+     * WHY THIS EXISTS
+     *
+     * The card has always fetched this path — `ChannelPoolSection` reads it on
+     * mount and `ChannelUsagePane` writes it — but no host route was ever
+     * registered for it, so every read 404'd (caught and rendered as "follows
+     * the global setting") and every click on a strategy answered `HTTP 404`.
+     * The deps were ready the whole time; only the registration was missing.
+     *
+     * GET returns the whole document. POST takes ONE channel and returns the
+     * whole document, for the same reason the aggregate save does: the card
+     * repaints from the answer, so a bare `{ok:true}` would cost a second
+     * round trip to learn what the effective strategy is now.
+     *
+     * `channel` must be a bare provider id and `strategy` either one of the
+     * five real strategies or absent (meaning "clear the override and follow
+     * the pool"). Anything else is a 400 rather than a stored value that would
+     * silently fall back at request time.
+     */
+    const disposeChannelUsage = ctx.webServer.register({
+      kind: 'exact',
+      path: POOL_CHANNEL_USAGE_PATH,
+      handler: async (req: IncomingMessage, res: ServerResponse) => {
+        if (req.method !== 'GET' && req.method !== 'POST') {
+          return json(res, 405, { error: 'method not allowed' })
+        }
+        if (!originTrusted(req, deps.trustedHosts?.() ?? [])) {
+          return json(res, 403, { error: 'origin-not-trusted' })
+        }
+        if (deps.channelUsage === undefined) {
+          return json(res, 503, { error: 'per-channel usage is not available in this build' })
+        }
+        try {
+          if (req.method === 'GET') return json(res, 200, deps.channelUsage())
+          if (deps.setChannelUsage === undefined) {
+            return json(res, 503, { error: 'per-channel usage cannot be saved in this build' })
+          }
+          const body = await readJsonBody(req)
+          const channel = body.channel
+          if (typeof channel !== 'string' || !/^[A-Za-z0-9_-]+$/u.test(channel)) {
+            return json(res, 400, { error: 'invalid channel' })
+          }
+          const raw = body.strategy
+          /*
+            `undefined` and `null` both mean "clear": the pane's "follow the
+            pool" option has no strategy of its own, and storing the pool's
+            current value instead would freeze that channel against a later
+            change to the pool default.
+          */
+          if (raw !== undefined && raw !== null && typeof raw !== 'string') {
+            return json(res, 400, { error: 'invalid strategy' })
+          }
+          await deps.setChannelUsage(channel, raw === null ? undefined : raw as string | undefined)
+          json(res, 200, deps.channelUsage())
+        } catch (error: unknown) {
+          json(res, 500, { error: safeMessage(error) })
+        }
+      },
+    })
     const disposeAccountPrefer = ctx.webServer.register({
       kind: 'exact',
       path: POOL_ACCOUNT_PREFER_PATH,
@@ -1773,6 +1835,7 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
       disposeCreditReserve()
       disposeAccountIgnore()
       disposeAccountPrefer()
+      disposeChannelUsage()
       disposeCatalogRefresh()
       disposeCheckin()
       disposeAccountDisable()
