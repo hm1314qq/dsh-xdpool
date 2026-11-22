@@ -2,20 +2,33 @@
  * The auto-check-in claim ledger.
  *
  * The reader opens this to answer one question: who collected what, who
- * failed, and why. So the design borrows from a till receipt: a big total up
- * top, dotted-leader rows between the account and its amount, and the
- * upstream's own failure message quoted underneath. Everything is tabular and
- * monospaced where it counts — this is a ledger, not a marketing card.
+ * failed, and why. So the shape borrows from a receipt: a headline total, one
+ * line per account with the vendor's own amount, and the upstream's failure
+ * message quoted underneath.
+ *
+ * IT IS BUILT FROM THE 3.0 DIALOG VOCABULARY, NOT ITS OWN STYLESHEET
+ *
+ * This component used to ship a private `.dsm-xdpool-ledger-*` sheet injected
+ * by a `<style>` tag. 3.0 consolidated every page onto one injected sheet and a
+ * single class vocabulary (`.pick*` for a dialog, `.btn`, `.pill`, `.hint`), and
+ * `tests/bundle-contract.test.ts` now fails a component that injects its own —
+ * rightly: a second stylesheet is a second set of tokens to keep in sync.
+ *
+ * So the markup reuses the same skeleton the aggregate page's model picker
+ * uses (scrim → `.pick` → `.pick-head` → `.pick-tools` → scrolling body →
+ * `.pick-foot`), and the only rules that are genuinely new — a dotted leader
+ * between the account and its amount, the group tone — live in `styles.ts`
+ * under `.ledger-*`, which is part of that one sheet.
  *
  * Behavioural notes learned the hard way:
  *
- *  1. The stylesheet travels WITH the component; a page-scoped <style> never
- *     reaches a dialog rendered elsewhere.
- *  2. The dialog owns no fetching. The parent refreshes on open and after a
+ *  1. The dialog owns no fetching. The parent refreshes on open and after a
  *     manual run, so there is exactly one source of truth.
- *  3. When the live snapshot has no rows but history does, the picker defaults
+ *  2. When the live snapshot has no rows but history does, the picker defaults
  *     to the newest run — "empty" should never be the first thing a reader
  *     sees when data exists one click away.
+ *  3. An explicit pick is never stolen: the auto-jump fires only while the
+ *     reader is still on `live` AND live is empty.
  *
  * @module dsh-xdpool/client/AutoCheckinDetails
  */
@@ -40,10 +53,10 @@ function groupOf(status: string): Group {
 /** Label for a provider-level status that has no per-account reason. */
 function statusLabel(status: string, t?: Translate): string {
   switch (status) {
-    case 'skipped': return t?.('auto.details.manual') ?? 'Manual check-in required'
-    case 'unsupported': return t?.('auto.details.unsupported') ?? 'No check-in API'
-    case 'none': return t?.('auto.details.none') ?? 'Nothing to claim'
-    case 'inactive': return t?.('auto.details.inactive') ?? 'Not claimable right now'
+    case 'skipped': return t?.('auto.details.manual') ?? '需手动签到'
+    case 'unsupported': return t?.('auto.details.unsupported') ?? '无签到接口'
+    case 'none': return t?.('auto.details.none') ?? '没有可领的'
+    case 'inactive': return t?.('auto.details.inactive') ?? '当前不可领'
     default: return status
   }
 }
@@ -164,33 +177,51 @@ export function AutoCheckinDetailsDialog({
     ? (t?.('auto.details.noRun') ?? '还没有完成过领取。')
     : new Date(lastAt).toLocaleString()
   const totalCredit = headerRun?.totals?.credit ?? 0
+  const totalAccounts = shownRows.length
 
   return (
-    <div className="dsm-xdpool-autodetails-scrim">
+    /*
+      覆盖层与聚合页的模型选择器同构：固定铺满 + oklch 遮罩，点击遮罩关闭。
+      用 role="presentation" 而不是 dialog —— 遮罩本身不是可聚焦的对话框。
+    */
+    <div
+      role="presentation"
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 80,
+        display: 'grid',
+        placeItems: 'center',
+        padding: 'var(--s5)',
+        background: 'oklch(0% 0 0 / 0.45)',
+      }}
+    >
       <div
         ref={panelRef}
-        className="dsm-xdpool-autodetails"
+        className="pick"
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        style={{ maxHeight: 'calc(100vh - 48px)', height: 'auto', width: 'min(560px, 100%)' }}
+        onClick={event => { event.stopPropagation() }}
       >
-        {/* ── Receipt head: what ran, when, and the number that matters ── */}
-        <div className="dsm-xdpool-ledger-head">
-          <div className="dsm-xdpool-ledger-id">
-            <span className="dsm-xdpool-ledger-eyebrow">{title}</span>
-            <span className="dsm-xdpool-ledger-when">{whenText}</span>
-          </div>
-          {headerRun !== undefined && (
-            <div className="dsm-xdpool-ledger-total" title={headerRun.result}>
-              <span className="dsm-xdpool-ledger-total-num">
-                {totalCredit > 0 ? `+${String(totalCredit)}` : String(totalCredit)}
-              </span>
-              <span className="dsm-xdpool-ledger-total-unit">{t?.('auto.details.creditUnit') ?? '积分'}</span>
-            </div>
+        {/* ── Head: what ran, when, and the number that matters ── */}
+        <div className="pick-head">
+          <span className="pick-title">{title}</span>
+          {/*
+            总额只在它真的描述下面的行时才出现（见 headerRun 的注释）。
+            单位跟在数字后面，和账号行的单位是同一个词。
+          */}
+          {headerRun === undefined ? null : (
+            <span className="pick-sum" title={headerRun.result}>
+              <b>{totalCredit > 0 ? `+${String(totalCredit)}` : String(totalCredit)}</b>
+              {' '}{t?.('auto.details.creditUnit') ?? '积分'}
+            </span>
           )}
           <button
             type="button"
-            className="dsm-xdpool-ledger-close"
+            className="pick-close"
             aria-label={t?.('auto.details.close') ?? '关闭'}
             onClick={onClose}
           >
@@ -199,8 +230,9 @@ export function AutoCheckinDetailsDialog({
         </div>
 
         {/* ── Toolbar: switch runs, or force a new pass ── */}
-        <div className="dsm-xdpool-ledger-toolbar">
-          <label className="dsm-xdpool-ledger-picker">
+        <div className="pick-tools">
+          <span className="pick-sum">{whenText}</span>
+          <label className="ledger-pick">
             <span>{t?.('auto.details.run') ?? '轮次'}</span>
             <select
               value={selected}
@@ -219,7 +251,8 @@ export function AutoCheckinDetailsDialog({
           </label>
           <button
             type="button"
-            className="dsm-xdpool-ledger-run"
+            className="tiny tiny-primary"
+            style={{ marginLeft: 'auto' }}
             disabled={running}
             onClick={onRunNow}
           >
@@ -230,9 +263,9 @@ export function AutoCheckinDetailsDialog({
         </div>
 
         {/* ── The receipt body ── */}
-        <div className="dsm-xdpool-ledger-body">
-          {shownRows.length === 0 && (
-            <p className="dsm-xdpool-ledger-empty">
+        <div className="pick-list">
+          {totalAccounts === 0 && (
+            <p className="hint" style={{ margin: 'var(--s2)' }}>
               {history.length === 0
                 ? (t?.('auto.details.empty') ?? '还没有逐账号记录。点「立即领取」跑一轮，或等下一次定时领取。')
                 : (t?.('auto.details.runEmpty') ?? '这一轮没有记录到逐账号明细。')}
@@ -246,14 +279,18 @@ export function AutoCheckinDetailsDialog({
                 : group === 'failed' ? (t?.('auto.details.failed') ?? '领取失败')
                   : (t?.('auto.details.other') ?? '暂不可领 / 已跳过')
             return (
-              <section key={group} className="dsm-xdpool-ledger-group" data-tone={group}>
-                <h4 className="dsm-xdpool-ledger-grouphead">
-                  <span className="dsm-xdpool-ledger-dot" aria-hidden="true" />
-                  <span className="dsm-xdpool-ledger-grouplabel">{label}</span>
-                  <span className="dsm-xdpool-ledger-rule" aria-hidden="true" />
-                  <span className="dsm-xdpool-ledger-count">{items.length}</span>
+              /*
+                分组标题用 .sec-head 那套排版（衬线标题 + 右侧计数），
+                data-tone 决定小圆点的颜色 —— 与渠道卡的 pill 同一套语义。
+              */
+              <section key={group} className="ledger-group" data-tone={group}>
+                <h4 className="ledger-grouphead">
+                  <span className="ledger-dot" aria-hidden="true" />
+                  <span className="ledger-grouplabel">{label}</span>
+                  <span className="ledger-rule" aria-hidden="true" />
+                  <span className="ledger-count">{items.length}</span>
                 </h4>
-                <ul className="dsm-xdpool-ledger-rows">
+                <ul className="ledger-rows">
                   {items.map((row, index) => {
                     const provider = names?.[row.provider] ?? row.provider
                     const who = row.nickname !== undefined && row.nickname !== ''
@@ -264,18 +301,18 @@ export function AutoCheckinDetailsDialog({
                       ? row.reason
                       : statusLabel(row.status, t)
                     return (
-                      <li key={`${row.provider}:${row.accountId ?? row.nickname ?? 'provider'}:${String(index)}`} className="dsm-xdpool-ledger-line">
-                        <div className="dsm-xdpool-ledger-row">
-                          <span className="dsm-xdpool-ledger-who" title={row.accountId ?? who}>{who}</span>
-                          <span className="dsm-xdpool-ledger-leader" aria-hidden="true" />
+                      <li key={`${row.provider}:${row.accountId ?? row.nickname ?? 'provider'}:${String(index)}`} className="ledger-line">
+                        <div className="ledger-row">
+                          <span className="ledger-who" title={row.accountId ?? who}>{who}</span>
+                          <span className="ledger-leader" aria-hidden="true" />
                           {amount !== ''
-                            ? <span className="dsm-xdpool-ledger-amount">{amount}</span>
-                            : <span className="dsm-xdpool-ledger-namount">{statusLabel(row.status, t)}</span>}
+                            ? <span className="ledger-amount" data-tone={group}>{amount}</span>
+                            : <span className="ledger-namount">{statusLabel(row.status, t)}</span>}
                         </div>
-                        <div className="dsm-xdpool-ledger-why">
+                        <div className="ledger-why">
                           {reason}
                           {row.code !== undefined && row.code !== 0 && (
-                            <span className="dsm-xdpool-ledger-code"> · code {String(row.code)}</span>
+                            <span className="ledger-code"> · code {String(row.code)}</span>
                           )}
                         </div>
                       </li>
@@ -290,8 +327,3 @@ export function AutoCheckinDetailsDialog({
     </div>
   )
 }
-
-/**
- * Self-contained ledger styles. Tokens come from the host theme when present
- * and fall back to the values the rest of this card ships with.
- */

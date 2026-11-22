@@ -1663,124 +1663,89 @@ export const BACKUP_CSS = `
    之前这个组件自己 <style> 注入一份，页面级样式表之外又多了一份；
    统一收到这里，和其余六个页面走同一个注入点。 */
 export const AUTO_LEDGER_CSS = `
-.dsm-xdpool-autodetails-scrim {
-  position: fixed; inset: 0; z-index: 60;
-  display: flex; align-items: center; justify-content: center;
-  padding: 24px;
-  background: rgba(6, 8, 12, 0.62);
-  backdrop-filter: blur(3px);
-  animation: xd-scrim-in 140ms ease-out;
+/* ---- 领取详情（AutoCheckinDetails）----
+
+   只用 3.0 已有的类（.pick / .pick-head / .pick-tools / .pick-list /
+   .hint / .tiny）就能画出九成，这里补的只有 3.0 没有的四样东西：
+   轮次选择器的排版、分组的色调、账号与金额之间的虚线引导、上游错误原文的次要行。
+   一切颜色与间距都取设计稿令牌，不引入自己的变量。 */
+
+/* 轮次选择器：跟在 .pick-tools 的一行里，标签淡、下拉框贴合令牌 */
+.ledger-pick{display:flex;align-items:center;gap:var(--s2);font-size:var(--fs-xs);color:var(--faint)}
+.ledger-pick select{
+  padding:2px 6px;
+  border-radius:var(--r-sm);
+  border:1px solid var(--line-2);
+  background:var(--surface-2);
+  color:var(--text);
+  font-size:var(--fs-xs);
+  font-family:inherit;
 }
-.dsm-xdpool-autodetails {
-  width: min(640px, 100%); max-height: min(76vh, 760px);
-  display: flex; flex-direction: column;
-  border-radius: 16px; overflow: hidden;
-  background: var(--dsw-alias-bg-layer-2, #1c1f27);
-  border: 1px solid var(--dsw-alias-border-l2, #323846);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
-  color: var(--dsw-alias-label-primary, #e8eaf0);
-  font-size: 13px;
-  animation: xd-ledger-in 160ms cubic-bezier(0.32, 0.72, 0, 1);
+.ledger-pick select:disabled{opacity:.5}
+
+/* 分组：容器不管间距（.pick-list 已经给了），只管标题那一行的排版 */
+.ledger-group{display:flex;flex-direction:column;gap:2px;margin-top:var(--s3)}
+.ledger-group:first-child{margin-top:0}
+.ledger-grouphead{
+  display:flex;align-items:center;gap:var(--s2);
+  margin:0 0 var(--s1);
+  padding:0 var(--s2);
+  font-weight:400;
 }
-@keyframes xd-scrim-in { from { opacity: 0; } }
-@keyframes xd-ledger-in { from { opacity: 0; transform: translateY(10px) scale(0.985); } }
-@media (prefers-reduced-motion: reduce) {
-  .dsm-xdpool-autodetails-scrim, .dsm-xdpool-autodetails { animation: none; }
+.ledger-dot{
+  flex:0 0 auto;width:6px;height:6px;border-radius:var(--r-pill);
+  background:var(--faint);
 }
-.dsm-xdpool-ledger-head {
-  display: flex; align-items: flex-start; gap: 12px;
-  padding: 18px 20px 14px;
-  border-bottom: 1px solid var(--dsw-alias-border-l2, #323846);
+.ledger-group[data-tone="success"] .ledger-dot{background:var(--ok)}
+.ledger-group[data-tone="already"] .ledger-dot{background:var(--accent)}
+.ledger-group[data-tone="failed"] .ledger-dot{background:var(--danger)}
+.ledger-group[data-tone="other"] .ledger-dot{background:var(--faint)}
+.ledger-grouplabel{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap}
+.ledger-rule{flex:1 1 auto;height:1px;background:var(--line)}
+.ledger-count{
+  flex:0 0 auto;
+  font-size:var(--fs-xs);color:var(--faint);
+  font-family:var(--mono);font-variant-numeric:tabular-nums;
 }
-.dsm-xdpool-ledger-id { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-.dsm-xdpool-ledger-eyebrow {
-  font-size: 11px; font-weight: 700; letter-spacing: 0.14em;
-  color: var(--dsw-alias-label-secondary, #98a0b3);
+
+.ledger-rows{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--s2)}
+.ledger-line{display:flex;flex-direction:column;gap:1px;padding:0 var(--s2)}
+
+/* 一行账目：名字 —— 虚线引导 —— 金额。引导线是这张「小票」的全部视觉主张 */
+.ledger-row{display:flex;align-items:baseline;gap:var(--s2);min-width:0}
+.ledger-who{
+  flex:0 1 auto;min-width:0;
+  font-size:var(--fs-sm);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
-.dsm-xdpool-ledger-when { font-size: 12px; color: var(--dsw-alias-label-tertiary, #7d8496); }
-.dsm-xdpool-ledger-total {
-  margin-left: auto; display: flex; align-items: baseline; gap: 6px;
-  padding: 4px 12px; border-radius: 10px;
-  background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #48c784) 14%, transparent);
+.ledger-leader{
+  flex:1 1 auto;min-width:12px;
+  align-self:center;
+  height:1px;
+  background-image:linear-gradient(to right,var(--line-2) 0 2px,transparent 2px 5px);
+  background-size:5px 1px;
+  background-repeat:repeat-x;
 }
-.dsm-xdpool-ledger-total-num {
-  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 22px; font-weight: 700; line-height: 1;
-  font-variant-numeric: tabular-nums;
-  color: var(--dsw-alias-state-success-primary, #48c784);
+.ledger-amount{
+  flex:0 0 auto;
+  font-size:var(--fs-sm);
+  font-family:var(--mono);
+  font-variant-numeric:tabular-nums;
 }
-.dsm-xdpool-ledger-total-unit { font-size: 11px; color: var(--dsw-alias-state-success-primary, #48c784); opacity: 0.85; }
-.dsm-xdpool-ledger-close {
-  border: 0; background: transparent; color: inherit; cursor: pointer;
-  font-size: 22px; line-height: 1; padding: 0 2px; opacity: 0.65; align-self: flex-start;
+.ledger-amount[data-tone="success"]{color:var(--ok)}
+.ledger-amount[data-tone="already"]{color:var(--muted)}
+.ledger-namount{
+  flex:0 0 auto;
+  font-size:var(--fs-xs);color:var(--faint);
+  white-space:nowrap;
 }
-.dsm-xdpool-ledger-close:hover { opacity: 1; }
-.dsm-xdpool-ledger-toolbar {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  padding: 10px 20px; border-bottom: 1px solid var(--dsw-alias-border-l2, #323846);
+
+/* 失败原因：上游原文照录，不和上面的数字抢注意力 */
+.ledger-why{
+  font-size:var(--fs-xs);
+  color:var(--faint);
+  line-height:1.5;
+  overflow-wrap:anywhere;
 }
-.dsm-xdpool-ledger-picker { display: inline-flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--dsw-alias-label-secondary, #98a0b3); }
-.dsm-xdpool-ledger-picker select {
-  max-width: 250px; padding: 4px 9px; border-radius: 7px; font-size: 11.5px;
-  background: var(--dsw-alias-bg-layer-3, #22252e); color: inherit;
-  border: 1px solid var(--dsw-alias-border-l2, #323846);
-}
-.dsm-xdpool-ledger-picker select:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, #5686fe); outline-offset: 1px; }
-.dsm-xdpool-ledger-run {
-  margin-left: auto; padding: 5px 14px; border-radius: 8px; cursor: pointer;
-  font-size: 11.5px; font-weight: 600; white-space: nowrap;
-  border: 1px solid var(--dsw-alias-state-success-primary, #48c784);
-  background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #48c784) 15%, transparent);
-  color: var(--dsw-alias-state-success-primary, #48c784);
-}
-.dsm-xdpool-ledger-run:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #48c784) 28%, transparent); }
-.dsm-xdpool-ledger-run:disabled { opacity: 0.55; cursor: default; }
-.dsm-xdpool-ledger-body { overflow: auto; padding: 6px 20px 20px; }
-.dsm-xdpool-ledger-empty { opacity: 0.7; padding: 26px 0; text-align: center; }
-.dsm-xdpool-ledger-group { margin-top: 16px; }
-.dsm-xdpool-ledger-grouphead {
-  display: flex; align-items: center; gap: 8px;
-  margin: 0 0 8px; font-size: 11px; font-weight: 700;
-  letter-spacing: 0.1em; text-transform: none;
-  color: var(--dsw-alias-label-secondary, #98a0b3);
-}
-.dsm-xdpool-ledger-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dsw-alias-label-tertiary, #6b7280); flex: none; }
-.dsm-xdpool-ledger-group[data-tone="success"] .dsm-xdpool-ledger-dot { background: var(--dsw-alias-state-success-primary, #48c784); }
-.dsm-xdpool-ledger-group[data-tone="already"] .dsm-xdpool-ledger-dot { background: var(--dsw-alias-state-business-primary, #7896dc); }
-.dsm-xdpool-ledger-group[data-tone="failed"] .dsm-xdpool-ledger-dot { background: var(--dsw-alias-state-error-primary, #e65a5a); }
-.dsm-xdpool-ledger-rule { flex: 1; border-top: 1px solid var(--dsw-alias-border-l2, #323846); opacity: 0.6; }
-.dsm-xdpool-ledger-count {
-  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-variant-numeric: tabular-nums;
-  font-size: 11px; min-width: 22px; text-align: center;
-  padding: 1px 7px; border-radius: 9px;
-  background: rgba(255, 255, 255, 0.07);
-}
-.dsm-xdpool-ledger-rows { list-style: none; margin: 0; padding: 0; }
-.dsm-xdpool-ledger-line { padding: 7px 2px 8px; border-bottom: 1px dashed var(--dsw-alias-border-l2, #323846); }
-.dsm-xdpool-ledger-line:last-child { border-bottom: 0; }
-.dsm-xdpool-ledger-row { display: flex; align-items: baseline; gap: 10px; }
-.dsm-xdpool-ledger-who { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
-.dsm-xdpool-ledger-leader {
-  flex: 1; min-width: 24px;
-  border-bottom: 1px dotted var(--dsw-alias-label-tertiary, #4a5162);
-  transform: translateY(-3px);
-}
-.dsm-xdpool-ledger-amount {
-  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-variant-numeric: tabular-nums;
-  font-size: 13px; font-weight: 700; white-space: nowrap;
-  color: var(--dsw-alias-state-success-primary, #48c784);
-}
-.dsm-xdpool-ledger-namount { font-size: 11px; white-space: nowrap; color: var(--dsw-alias-label-tertiary, #7d8496); }
-.dsm-xdpool-ledger-why {
-  margin-top: 3px; padding-left: 2px;
-  font-size: 11.5px; line-height: 16px;
-  color: var(--dsw-alias-label-tertiary, #98a0b3);
-  overflow-wrap: anywhere; white-space: pre-wrap;
-}
-.dsm-xdpool-ledger-group[data-tone="failed"] .dsm-xdpool-ledger-why {
-  color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #e65a5a) 82%, var(--dsw-alias-label-primary, #e8eaf0));
-}
-.dsm-xdpool-ledger-code { opacity: 0.75; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+.ledger-code{font-family:var(--mono);opacity:.8}
 `
