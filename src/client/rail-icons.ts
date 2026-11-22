@@ -16,6 +16,8 @@ export const RAIL_ICONS = {
   login: LOGIN_ICON,
   aggregate: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/>',
   ledger: '<path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/>',
+  /* 领取账本：一张带勾的小票，与「数据看板」的柱状图区分开。 */
+  checkin: '<path d="M5 3h14v13l-2-1.4-2 1.4-2-1.4-2 1.4-2-1.4L5 16z"/><path d="M9 8.5l2 2 4-4"/>',
   routing: '<path d="M6 3v18M18 3v18M6 8h12M6 16h12"/>',
   gateway: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18"/>',
   backup: '<path d="M12 3v12M8 11l4 4 4-4"/><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/>',
