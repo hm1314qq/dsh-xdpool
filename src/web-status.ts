@@ -1347,11 +1347,25 @@ export function registerPoolStatusRoute(ctx: Context, deps: PoolStatusRouteOptio
             pool" option has no strategy of its own, and storing the pool's
             current value instead would freeze that channel against a later
             change to the pool default.
+
+            Anything else must be one of the five REAL strategies. A type check
+            alone is not enough: `setChannelUsage` validates again and silently
+            drops an unknown value, so `"nonsense"` used to answer `200` with an
+            unchanged document — the caller could not tell a save from a no-op,
+            and the pane kept showing the old selection without an error.
+
+            The check uses `isDistributionStrategy` from `status-paths.ts`
+            rather than the copy in `channel-usage.ts`: that module reads
+            `node:fs` for the overrides file, and this header is shared with the
+            browser half. Two definitions of "a valid strategy" would also be
+            one too many.
           */
-          if (raw !== undefined && raw !== null && typeof raw !== 'string') {
-            return json(res, 400, { error: 'invalid strategy' })
+          if (raw !== undefined && raw !== null) {
+            if (typeof raw !== 'string' || !isDistributionStrategy(raw)) {
+              return json(res, 400, { error: 'invalid strategy' })
+            }
           }
-          await deps.setChannelUsage(channel, raw === null ? undefined : raw as string | undefined)
+          await deps.setChannelUsage(channel, typeof raw === 'string' ? raw : undefined)
           json(res, 200, deps.channelUsage())
         } catch (error: unknown) {
           json(res, 500, { error: safeMessage(error) })

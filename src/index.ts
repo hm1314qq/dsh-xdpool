@@ -1683,7 +1683,23 @@ function canonicalJson(value: unknown): string {
      * the effective value is computed the same way either way.
      */
     channelUsage: () => ({
-      pool: config.distribution ?? 'priority',
+      /*
+        The pool-wide default must come from the RUNNING pool, not from the
+        schema default this closure captured.
+
+        `config.distribution` is what `apply()` was handed at mount. It is not
+        what the pool is doing now: a later settings write goes through
+        `applyConfig`, and a host that never writes that key at all leaves the
+        schema default (`priority`) sitting here while the pool runs something
+        else. Reading it here made the pane report `{}` → "priority" for a pool
+        actually on `expiry`, and then offer to save a strategy that was already
+        overridden — the `status` route has always reported
+        `pool.currentDistribution()`, so the two screens disagreed.
+
+        `currentDistribution()` is the same call the status route makes, which
+        is what makes these two answers agree by construction.
+      */
+      pool: core.pool.currentDistribution(),
       channels: readChannelUsage(),
     }),
     setChannelUsage: async (channel: string, strategy: string | undefined) => {

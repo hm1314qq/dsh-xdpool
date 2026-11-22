@@ -100,5 +100,46 @@ describe('every route the browser calls is registered by the host', () => {
     // The channel name is checked against a bare-identifier pattern, so a URL or
     // a path cannot be stored as a provider id.
     expect(text).toMatch(/\[A-Za-z0-9_-\]/u)
+    /*
+      A type check is not a value check. `setChannelUsage` validates again and
+      silently drops an unknown value, so checking only `typeof raw === 'string'`
+      answered `200` for `"nonsense"` with an unchanged document — a save and a
+      no-op were indistinguishable to the caller. This asserts the membership
+      test is actually applied.
+    */
+    expect(text).toContain('isDistributionStrategy(raw)')
+  })
+
+  it('reports the pool strategy the pool is actually running', () => {
+    /*
+      Found by exercising the live route: `channels/usage` answered
+      `pool: {}` while `/status` answered `distribution: "expiry"`.
+      The cause was reading `config.distribution` — the value `apply()` was
+      handed at mount, which a host that never writes that key leaves at the
+      schema default. `status` has always used `pool.currentDistribution()`;
+      the two screens must agree, so the pane now reads the same call.
+    */
+    const text = readFileSync(new URL('index.ts', SRC), 'utf8')
+    const at = text.indexOf('channelUsage: () => ({')
+    expect(at, 'channelUsage dep is gone').toBeGreaterThan(-1)
+    // Slice to the end of the dep's own object, not a fixed width: the comment
+    // above the `pool` key is long, and a truncated window would assert against
+    // the wrong thing.
+    const end = text.indexOf('setChannelUsage:', at)
+    expect(end, 'setChannelUsage dep is gone').toBeGreaterThan(at)
+    const block = text.slice(at, end)
+    expect(block).toContain('core.pool.currentDistribution()')
+    /*
+      Assert against the CODE, not the prose: the comment above `pool` explains
+      the old bug by name, so a plain `not.toContain` would fail on the very
+      documentation that prevents a regression. Both comment forms are stripped
+      before the assertion.
+    */
+    const code = block
+      .replace(/\/\*[\s\S]*?\*\//gu, '')
+      .split('\n')
+      .map(line => line.replace(/\/\/.*$/u, ''))
+      .join('\n')
+    expect(code, 'the mount-time config value is not the live strategy').not.toContain('config.distribution')
   })
 })
