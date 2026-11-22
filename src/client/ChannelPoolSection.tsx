@@ -2511,6 +2511,24 @@ export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoCla
             <span className="ls-k">积分</span>
           </div>
         </div>
+        {/*
+          领取账本的入口放在这一行的右端（三格统计旁边），因为它回答的正是这三格
+          之后的第四个问题：「这些积分是怎么领来的」。
+
+          它是一页而不是浮层：账本要跨轮次、跨渠道对照，盖住账号池的弹窗做不到。
+        */}
+        {onOpenCheckin === undefined ? null : (
+          <button
+            type="button"
+            className="btn"
+            /* 靠右对齐：这一行的三格统计也是右对齐的，按钮跟着走才不会显得漂浮 */
+            style={{ alignSelf: 'flex-end' }}
+            onClick={onOpenCheckin}
+            title={t?.('channelpool.checkinHint') ?? '逐账号的领取明细：谁领到了、谁失败了、为什么'}
+          >
+            {t?.('chan.autoDetails') ?? '领取详情'}
+          </button>
+        )}
       </div>
       <div className="list-scroll">
         {bound.length === 0 ? null : (
@@ -2878,18 +2896,6 @@ export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoCla
               <span className="policy-hint">
                 {t?.('channelpool.autoClaimHint') ?? '开着就会在后台领每天的积分，不用手动点。'}
               </span>
-              {/*
-                汇总行只能回答「几个失败」，回答不了「哪一家、哪个账号、为什么」。
-                账本里的逐账号明细才是那个答案；这里给的是去那一页的入口。
-                它是页面而不是弹窗：要跨轮次、跨渠道对照，盖住账号池的浮层做不到。
-              */}
-              <button
-                type="button"
-                className="dsm-xdpool-autocheckin-details"
-                onClick={() => { onOpenCheckin?.() }}
-              >
-                {t?.('chan.autoDetails') ?? '领取详情'}
-              </button>
             </div>
           )}
         </div>

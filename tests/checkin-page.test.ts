@@ -21,22 +21,40 @@ import { readFileSync } from 'node:fs'
 const SRC = new URL('../src/client/', import.meta.url)
 const read = (name: string): string => readFileSync(new URL(name, SRC), 'utf8')
 
-describe('the claim ledger is a rail page', () => {
-  it('has a rail tab', () => {
-    const shell = read('PoolCard.tsx')
-    expect(shell).toMatch(/id: 'checkin', label: t\?\.\('shell\.tabCheckin'\)/u)
+describe('the claim ledger opens from the account pool header', () => {
+  it('puts its entry in the pool list header, beside the three stats', () => {
+    /*
+      The entry belongs on the row that already says「账号池 · 13 账号 · 12 已连 ·
+      2.6 万积分」: the ledger answers the fourth question that row implies —
+      where those credits came from. A rail tab was tried first and rejected:
+      the rail is the plugin's page switcher, and this is a reading of the pool,
+      not a second place to stand.
+    */
+    const section = read('ChannelPoolSection.tsx')
+    const head = section.slice(section.indexOf('className="list-stats"'))
+    const beforeScroll = head.slice(0, head.indexOf('list-scroll'))
+    expect(beforeScroll, 'the entry must sit inside .list-head').toContain('onOpenCheckin')
+    expect(beforeScroll).toContain("t?.('chan.autoDetails')")
   })
 
-  it('renders the page for that tab', () => {
+  it('keeps it out of the rail', () => {
+    // Three task lists ago this was a rail page. Two entries for one page is
+    // how a plugin ends up with a nav that nobody can reason about.
+    const shell = read('PoolCard.tsx')
+    expect(shell).not.toContain("id: 'checkin'")
+  })
+
+  it('renders the page when the pool asks for it', () => {
     const shell = read('PoolCard.tsx')
     expect(shell).toContain("page === 'checkin' ? <AutoCheckinPage")
-    // The channel panel opens it by switching the page, not by opening a modal.
+    // The pool header opens it by switching the page, not by opening a modal.
     expect(shell).toContain("onOpenCheckin={() => { setPage('checkin') }}")
   })
 
-  it('gives the page a rail icon and localized labels', () => {
-    // A tab with no entry in RAIL_ICONS falls back to the bare initial, which
-    // reads as a placeholder next to seven real glyphs.
+  it('keeps a rail icon available even though the rail no longer shows it', () => {
+    // RAIL_ICONS is keyed by page id; leaving the glyph in place means restoring
+    // the tab later is a one-line change, and a missing key would silently fall
+    // back to the bare initial.
     expect(read('rail-icons.ts')).toContain('checkin:')
     const locales = read('locales.ts')
     expect(locales).toContain("'shell.tabCheckin': 'Claim ledger'")

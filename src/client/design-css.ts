@@ -20,21 +20,35 @@ export const DESIGN_TOKENS_CSS = `/* XD Pool 设计变量
    其余全部是无彩色 —— 工具不该有品牌色铺满屏。
    ============================================================ */
 .app {
-  /* ---- 表面：四层，亮度递进 ---- */
-  --bg: oklch(12.5% 0.008 175);          /* 页面底 */
-  --surface: oklch(16.5% 0.009 175);     /* 卡片 */
-  --surface-2: oklch(20% 0.010 175);     /* 卡片内嵌层 / 表头 */
-  --surface-3: oklch(24% 0.011 175);     /* 控件底 / 进度槽 */
+  /*
+    表面层级：问宿主，再退回设计稿。
 
-  /* ---- 文字：三档，全部带底色 ---- */
-  --text: oklch(96% 0.003 175);          /* 主文字，不用纯白 */
-  --muted: oklch(73% 0.008 175);         /* 次要 */
-  --faint: oklch(63% 0.008 175);         /* 标签、单位、弱提示 */
+    WHY THE HOST COMES FIRST
+
+    这四层原来是写死的 oklch 值，于是插件在宿主里是「一块颜色不一样的区域」——
+    宿主换了浅色主题、换了品牌色、调了对比度，插件都不动。用户看到的是两个
+    产品拼在一起（「bgc 和 dsh 同频」说的就是这个）。
+
+    写成 var(--dsw-alias-bg-layer-N, 设计稿值) 的形式：宿主的令牌赢，插件只在
+    宿主没给的时候用自己的。设计稿的值仍是兜底，所以独立预览时看起来还是设计稿。
+
+    注意宿主的层号方向：layer-0 是最底，layer-3 最高。这里把设计稿的
+    bg / surface / surface-2 / surface-3 依次接上去。
+  */
+  --bg: var(--dsw-alias-bg-layer-0, oklch(12.5% 0.008 175));          /* 页面底 */
+  --surface: var(--dsw-alias-bg-layer-1, oklch(16.5% 0.009 175));     /* 卡片 */
+  --surface-2: var(--dsw-alias-bg-layer-2, oklch(20% 0.010 175));     /* 卡片内嵌层 / 表头 */
+  --surface-3: var(--dsw-alias-bg-layer-3, oklch(24% 0.011 175));     /* 控件底 / 进度槽 */
+
+  /* ---- 文字：三档，同样先问宿主 ---- */
+  --text: var(--dsw-alias-label-primary, oklch(96% 0.003 175));       /* 主文字，不用纯白 */
+  --muted: var(--dsw-alias-label-secondary, oklch(73% 0.008 175));    /* 次要 */
+  --faint: var(--dsw-alias-label-tertiary, oklch(63% 0.008 175));     /* 标签、单位、弱提示 */
 
   /* ---- 分隔线：半透明，永远不实色 ---- */
-  --line: oklch(100% 0 0 / 0.06);
-  --line-2: oklch(100% 0 0 / 0.11);
-  --line-3: oklch(100% 0 0 / 0.18);      /* 只在必须被看见处 */
+  --line: var(--dsw-alias-border-l1, oklch(100% 0 0 / 0.06));
+  --line-2: var(--dsw-alias-border-l2, oklch(100% 0 0 / 0.11));
+  --line-3: var(--dsw-alias-border-l3, oklch(100% 0 0 / 0.18));      /* 只在必须被看见处 */
 
   /* ---- 主色：冷青，低饱和 ---- */
   --accent: oklch(74% 0.085 165);

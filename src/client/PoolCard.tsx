@@ -562,12 +562,6 @@ export function PoolCard({ t, settingsScope }: PoolCardProps) {
     { id: 'channels', label: t?.('shell.tabChannels') ?? 'Login channels' },
     { id: 'aggregate', label: t?.('shell.tabAggregate') ?? 'Providers' },
     { id: 'ledger', label: t?.('shell.tabLedger') ?? 'Dashboard' },
-    /*
-      The claim ledger sits with the other "read everything" pages rather than
-      inside a channel's panel: comparing runs and channels is what it is for,
-      and a dialog that has to be dismissed cannot do that.
-    */
-    { id: 'checkin', label: t?.('shell.tabCheckin') ?? 'Claim ledger' },
     { id: 'routing', label: t?.('shell.tabRouting') ?? 'Routing' },
     { id: 'gateway', label: t?.('shell.tabGateway') ?? 'Gateway' },
     { id: 'backup', label: t?.('shell.tabBackup') ?? 'Backup' },
