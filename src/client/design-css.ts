@@ -21,36 +21,50 @@ export const DESIGN_TOKENS_CSS = `/* XD Pool 设计变量
    ============================================================ */
 .app {
   /*
-    页面底：跟宿主同频。
+    颜色：整套向宿主取，插件自己不再写一套明暗。
 
-    只有 --bg 接宿主的底（bg-layer-0）。理由：插件挂在宿主的页面上，自己再画
-    一层底就成了「一块颜色不一样的区域」—— 宿主换主题时那块不动，看起来是两个
-    产品拼在一起。
+    WHY NOT A FIXED PALETTE
 
-    表面层级（--surface … --surface-3）**不接**宿主的 bg-layer-1/2/3。试过，
-    不行：宿主浅色主题下 bg-layer-1 是近白色，而插件整站是深色系，卡片底一变成
-    白、字还是浅色，模型列表直接不可读（实测截图）。「同频」指的是底色衔接，
-    不是把宿主的每一层表面都搬过来 —— 表面属于这个插件自己的视觉语言。
+    设计稿定的是深色，写死之后插件的主题就永远是深的 —— 宿主切成白色，
+    插件还是一块黑，看起来像两个产品拼在一起。这正是「还全是暗色」的来源。
 
-    文字三层与分割线同理：取宿主的标签色会在浅色主题下变深，而插件底仍是深的，
-    对比度就反了。它们跟随插件自己的表面，兜底值就是设计稿的深色系。
+    也试过只把页面底接给宿主、表面仍用设计稿深色，结果更糟：白底 + 深卡片，
+    两种语言各说各话。
+
+    所以现在每一层都取宿主的令牌，并用设计稿的值作兜底（独立预览时外观不变）：
+
+      --bg        ← bg-layer-0        页面底
+      --surface   ← bg-layer-1        卡片
+      --surface-2 ← bg-layer-2        卡片内嵌层 / 表头
+      --surface-3 ← bg-layer-3        控件底 / 进度槽
+      --text      ← label-primary     主文字
+      --muted     ← label-secondary   次要
+      --faint     ← label-tertiary    标签 / 单位 / 弱提示
+      --line*     ← border-l1/l2/l3   发丝线
+
+    文字与表面必须一起取：只换其中一半，浅色主题下对比度就反过来（上一轮的
+    毛病）。一起取则宿主的明暗自动成立，插件不需要自己判断当前是什么主题。
+
+    注意「半透明白」那几条不适用：oklch(100% 0 0 / .06) 这种「提亮一档」在浅色底上
+    等于没画，所以描边一律走 --line*，其余提亮改用 currentColor 或 var(--text)，
+    两者都会随主题反转。
   */
   --bg: var(--dsw-alias-bg-layer-0, oklch(12.5% 0.008 175));          /* 页面底 */
-  --surface: oklch(16.5% 0.009 175);     /* 卡片 */
-  --surface-2: oklch(20% 0.010 175);     /* 卡片内嵌层 / 表头 */
-  --surface-3: oklch(24% 0.011 175);     /* 控件底 / 进度槽 */
+  --surface: var(--dsw-alias-bg-layer-1, oklch(16.5% 0.009 175));     /* 卡片 */
+  --surface-2: var(--dsw-alias-bg-layer-2, oklch(20% 0.010 175));     /* 卡片内嵌层 / 表头 */
+  --surface-3: var(--dsw-alias-bg-layer-3, oklch(24% 0.011 175));     /* 控件底 / 进度槽 */
 
-  /* ---- 文字：三档，全部带底色 ---- */
-  --text: oklch(96% 0.003 175);          /* 主文字，不用纯白 */
-  --muted: oklch(73% 0.008 175);         /* 次要 */
-  --faint: oklch(63% 0.008 175);         /* 标签、单位、弱提示 */
+  /* ---- 文字：三档，全部向宿主取 ---- */
+  --text: var(--dsw-alias-label-primary, oklch(96% 0.003 175));       /* 主文字 */
+  --muted: var(--dsw-alias-label-secondary, oklch(73% 0.008 175));    /* 次要 */
+  --faint: var(--dsw-alias-label-tertiary, oklch(63% 0.008 175));     /* 标签、单位、弱提示 */
 
-  /* ---- 分隔线：半透明，永远不实色 ---- */
-  --line: oklch(100% 0 0 / 0.06);
-  --line-2: oklch(100% 0 0 / 0.11);
-  --line-3: oklch(100% 0 0 / 0.18);      /* 只在必须被看见处 */
+  /* ---- 分隔线：走宿主的边框令牌，深浅自动成立 ---- */
+  --line: var(--dsw-alias-border-l1, oklch(100% 0 0 / 0.06));
+  --line-2: var(--dsw-alias-border-l2, oklch(100% 0 0 / 0.11));
+  --line-3: var(--dsw-alias-border-l3, oklch(100% 0 0 / 0.18));
 
-  /* ---- 主色：冷青，低饱和 ---- */
+  /* ---- 主色：设计稿的绿是插件身份，不跟宿主品牌色走 ---- */
   --accent: oklch(74% 0.085 165);
   --accent-strong: oklch(80% 0.090 165);  /* hover */
   --accent-dim: oklch(74% 0.085 165 / 0.13);
@@ -128,13 +142,13 @@ export const DESIGN_TOKENS_CSS = `/* XD Pool 设计变量
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: oklch(100% 0 0 / 0.08);
+  background: color-mix(in oklch, currentColor 8%, transparent);
   border-radius: var(--r-pill);
   border: 3px solid transparent;
   background-clip: content-box;
   transition: background var(--t-fast) var(--ease);
 }
-::-webkit-scrollbar-thumb:hover { background: oklch(100% 0 0 / 0.16); background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: color-mix(in oklch, currentColor 16%, transparent); background-clip: content-box; }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition-duration: 1ms !important; animation-duration: 1ms !important; }
@@ -619,7 +633,7 @@ export const DESIGN_DETAIL_CSS = `/* XD Pool 公共骨架
   margin-top: -6px;
   border-radius: 50%;
   background: var(--faint);
-  box-shadow: 0 1px 2px oklch(0% 0 0 / 0.4), inset 0 1px 0 oklch(100% 0 0 / 0.14);
+  box-shadow: 0 1px 2px color-mix(in oklch, var(--text) 18%, transparent), inset 0 1px 0 color-mix(in oklch, var(--text) 14%, transparent);
   transition: transform var(--t-base) var(--ease), background var(--t-base) var(--ease);
 }
 .sw[aria-checked="true"]::before {

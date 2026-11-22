@@ -145,7 +145,7 @@ ${TOKENS}
    ============================================================ */
 
 .dsm-xdpool-rail::-webkit-scrollbar{width:6px}
-.dsm-xdpool-rail::-webkit-scrollbar-thumb{background:#ffffff1f;border-radius:999px}
+.dsm-xdpool-rail::-webkit-scrollbar-thumb{background:color-mix(in oklch, currentColor 12%, transparent);border-radius:999px}
 /* 前面一个 4px 点：已登录是主色，未登录是灰的（设计稿 .list-group::before） */
 .dsm-xdpool-railsection::before{
   content:'';flex:0 0 auto;
@@ -306,7 +306,7 @@ ${TOKENS}
   font-variant-numeric:tabular-nums;
 }
 
-.dsm-xdpool-railrow:hover{background:#ffffff0d;color:var(--xd-text)}
+.dsm-xdpool-railrow:hover{background:color-mix(in oklch, currentColor 5%, transparent);color:var(--xd-text)}
 .dsm-xdpool-railrow[data-active="true"]{background:var(--xd-surface-2);color:var(--xd-text);font-weight:600}
 /* Unbound channels read as secondary: they are doors, not holdings. */
 .dsm-xdpool-railrow[data-state="idle"] .dsm-xdpool-railmark{opacity:.4;filter:grayscale(1)}
@@ -354,7 +354,7 @@ ${TOKENS}
 .dsm-xdpool-detailtitle{display:flex;align-items:baseline;gap:var(--xd-s2);flex-wrap:wrap;min-width:0}
 .dsm-xdpool-detailmark{
   display:inline-flex;align-items:center;justify-content:center;flex:0 0 22px;
-  width:22px;height:22px;border-radius:6px;background:#ffffff0f;
+  width:22px;height:22px;border-radius:6px;background:color-mix(in oklch, currentColor 6%, transparent);
   font-size:9px;font-weight:700;overflow:hidden;
 }
 .dsm-xdpool-detailmark img{display:block;width:22px;height:22px;border-radius:6px;object-fit:cover}
@@ -409,7 +409,7 @@ ${TOKENS}
   padding:var(--xd-s3);display:flex;flex-direction:column;gap:var(--xd-s3);
 }
 .dsm-xdpool-detailbody::-webkit-scrollbar{width:8px}
-.dsm-xdpool-detailbody::-webkit-scrollbar-thumb{background:#ffffff1f;border-radius:999px}
+.dsm-xdpool-detailbody::-webkit-scrollbar-thumb{background:color-mix(in oklch, currentColor 12%, transparent);border-radius:999px}
 .dsm-xdpool-detailempty{
   display:flex;align-items:center;justify-content:center;min-height:160px;padding:24px;
   font-size:var(--xd-fs-xs);line-height:18px;color:var(--xd-faint);text-align:center;
@@ -423,15 +423,15 @@ ${TOKENS}
 @keyframes dsm-xdpool-skel-in{from{opacity:0}to{opacity:1}}
 .dsm-xdpool-skelrow{
   display:flex;align-items:flex-start;gap:10px;padding:var(--xd-s2);
-  border-radius:var(--xd-radius-panel);background:#ffffff08;position:relative;overflow:hidden;
+  border-radius:var(--xd-radius-panel);background:color-mix(in oklch, currentColor 3%, transparent);position:relative;overflow:hidden;
 }
-.dsm-xdpool-skelmark{flex:0 0 24px;width:24px;height:24px;border-radius:999px;background:#ffffff14}
+.dsm-xdpool-skelmark{flex:0 0 24px;width:24px;height:24px;border-radius:999px;background:color-mix(in oklch, currentColor 8%, transparent)}
 .dsm-xdpool-skelcopy{display:flex;flex-direction:column;gap:6px;flex:1 1 auto;min-width:0}
-.dsm-xdpool-skelline{height:12px;border-radius:6px;background:#ffffff14}
-.dsm-xdpool-skelline-short{height:10px;border-radius:5px;background:#ffffff0f}
+.dsm-xdpool-skelline{height:12px;border-radius:6px;background:color-mix(in oklch, currentColor 8%, transparent)}
+.dsm-xdpool-skelline-short{height:10px;border-radius:5px;background:color-mix(in oklch, currentColor 6%, transparent)}
 .dsm-xdpool-skelrow::after{
   content:"";position:absolute;inset:0;width:320px;
-  background:linear-gradient(90deg,transparent,#ffffff14,transparent);
+  background:linear-gradient(90deg,transparent,color-mix(in oklch, currentColor 8%, transparent),transparent);
   animation:dsm-xdpool-skelband 1.2s linear infinite;
 }
 @keyframes dsm-xdpool-skelband{from{transform:translateX(-320px)}to{transform:translateX(100%)}}
@@ -702,7 +702,7 @@ export const SHELL_FRAME_CSS = `
   min-width:0;
 }
 .dsm-xdpool-shellfoot::-webkit-scrollbar{width:8px}
-.dsm-xdpool-shellfoot::-webkit-scrollbar-thumb{background:#ffffff1f;border-radius:999px}
+.dsm-xdpool-shellfoot::-webkit-scrollbar-thumb{background:color-mix(in oklch, currentColor 12%, transparent);border-radius:999px}
 /* The panel is the only scroll area on the page. */
 
 /* ============================================================
@@ -765,7 +765,7 @@ export const SHELL_FRAME_CSS = `
   overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;
 }
 .dsm-xdpool-shellpanel::-webkit-scrollbar{width:8px}
-.dsm-xdpool-shellpanel::-webkit-scrollbar-thumb{background:#ffffff1f;border-radius:999px}
+.dsm-xdpool-shellpanel::-webkit-scrollbar-thumb{background:color-mix(in oklch, currentColor 12%, transparent);border-radius:999px}
 
 /* ---- dock: narrow screens only ------------------------------------------ */
 .dsm-xdpool-dock{display:none}

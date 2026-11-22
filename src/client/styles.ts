@@ -591,14 +591,14 @@ export const POOL_CARD_CSS = `
    dot as well as a word, because a colour on its own is unreadable for anyone
    who cannot separate the tint from the surface, and "cooling" must never be
    told from "connected" by hue alone. */
-.dsm-xdpool-region-state{flex:none;display:inline-flex;align-items:center;gap:8px;padding:6px 14px;border-radius:999px;border:1px solid var(--dsw-alias-border-l1,#ffffff14);background:color-mix(in srgb, var(--dsw-alias-bg-layer-1,#191a1e) 72%, transparent);box-shadow:inset 0 1px 0 rgb(255 255 255 / 4%);font-size:12.5px;font-weight:650;white-space:nowrap;color:var(--dsw-alias-label-secondary,#c6c9d0)}
+.dsm-xdpool-region-state{flex:none;display:inline-flex;align-items:center;gap:8px;padding:6px 14px;border-radius:999px;border:1px solid var(--dsw-alias-border-l1,color-mix(in oklch, currentColor 8%, transparent));background:color-mix(in srgb, var(--dsw-alias-bg-layer-1,#191a1e) 72%, transparent);box-shadow:inset 0 1px 0 rgb(255 255 255 / 4%);font-size:12.5px;font-weight:650;white-space:nowrap;color:var(--dsw-alias-label-secondary,#c6c9d0)}
 .dsm-xdpool-region-state::before{content:"";width:8px;height:8px;flex:none;border-radius:50%;background:currentColor}
 /* Each state tints the badge's OWN fill. A coloured box-shadow RING was the
    earlier treatment and it read as a notification rather than as a status.
    Cooling stays neutral grey on purpose: grey means "waiting", and painting it
    green or red would assert something the card has not measured. */
 .dsm-xdpool-region[data-state="ok"] .dsm-xdpool-region-state{color:var(--dsw-alias-state-success-primary,#22a06b);border-color:color-mix(in srgb, var(--dsw-alias-state-success-primary,#22a06b) 34%, transparent);background:color-mix(in srgb, var(--dsw-alias-state-success-primary,#22a06b) 11%, transparent)}
-.dsm-xdpool-region[data-state="cooling"] .dsm-xdpool-region-state{color:var(--dsw-alias-label-secondary,#c6c9d0);border-color:var(--dsw-alias-border-l1,#ffffff14);background:color-mix(in srgb, var(--dsw-alias-bg-layer-1,#191a1e) 72%, transparent)}
+.dsm-xdpool-region[data-state="cooling"] .dsm-xdpool-region-state{color:var(--dsw-alias-label-secondary,#c6c9d0);border-color:var(--dsw-alias-border-l1,color-mix(in oklch, currentColor 8%, transparent));background:color-mix(in srgb, var(--dsw-alias-bg-layer-1,#191a1e) 72%, transparent)}
 .dsm-xdpool-region[data-state="error"] .dsm-xdpool-region-state{color:var(--dsw-alias-state-error-primary,#ef4444);border-color:color-mix(in srgb, var(--dsw-alias-state-error-primary,#ef4444) 34%, transparent);background:color-mix(in srgb, var(--dsw-alias-state-error-primary,#ef4444) 11%, transparent)}
 /* One line, clamped to two. A card that grows with its copy stops being a
    card, and a 40px tile beside four wrapped lines reads as a broken layout.
@@ -903,7 +903,7 @@ export const SHELL_CSS = `
 /* One focus ring for the whole card. Every control below inherits it, so a
    rewrite of an individual button cannot invent a second, louder one. */
 .dsm-xdpool-shell :focus-visible{outline:2px solid color-mix(in srgb, var(--dsw-alias-state-business-primary,#5686fe) 78%, transparent);outline-offset:2px;box-shadow:0 0 0 4px color-mix(in srgb, var(--dsw-alias-state-business-primary,#5686fe) 13%, transparent)}
-.dsm-xdpool-glass{border:1px solid color-mix(in srgb, var(--dsw-alias-border-l2,#ffffff1f) 78%, transparent);border-radius:16px;background:color-mix(in srgb, var(--dsw-alias-bg-layer-2,#1c1e22) 68%, transparent);box-shadow:inset 0 1px 0 rgb(255 255 255 / 6%), 0 12px 34px rgb(0 0 0 / 9%)}
+.dsm-xdpool-glass{border:1px solid color-mix(in srgb, var(--dsw-alias-border-l2,color-mix(in oklch, currentColor 12%, transparent)) 78%, transparent);border-radius:16px;background:color-mix(in srgb, var(--dsw-alias-bg-layer-2,#1c1e22) 68%, transparent);box-shadow:inset 0 1px 0 rgb(255 255 255 / 6%), 0 12px 34px rgb(0 0 0 / 9%)}
 /* Three soft colour washes behind the chrome. Low opacity and no
    "filter:blur()" on purpose — see the note on the nav above: a blurred child
    inside a dialog whose ancestors already use "backdrop-filter" is the
@@ -921,7 +921,7 @@ export const SHELL_CSS = `
    backdrop-filtered ancestor with another one is where GPUs go to die. Large
    radius + a low-opacity solid fill gives the same frosted read for a
    fraction of the cost. */
-.dsm-xdpool-nav{position:sticky;top:0;z-index:30;display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px 12px;padding:10px 12px;border-radius:16px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l2,#ffffff1f) 82%, transparent);background:color-mix(in srgb, var(--dsw-alias-bg-layer-2,#1c1e22) 62%, transparent);box-shadow:inset 0 1px 0 rgb(255 255 255 / 7%), 0 8px 26px rgb(0 0 0 / 10%)}
+.dsm-xdpool-nav{position:sticky;top:0;z-index:30;display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px 12px;padding:10px 12px;border-radius:16px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l2,color-mix(in oklch, currentColor 12%, transparent)) 82%, transparent);background:color-mix(in srgb, var(--dsw-alias-bg-layer-2,#1c1e22) 62%, transparent);box-shadow:inset 0 1px 0 rgb(255 255 255 / 7%), 0 8px 26px rgb(0 0 0 / 10%)}
 .dsm-xdpool-brand{display:flex;align-items:center;gap:9px;min-width:0}
 .dsm-xdpool-avatar{width:26px;height:26px;flex:none;border-radius:9px;object-fit:cover;box-shadow:inset 0 1px 0 rgb(255 255 255 / 22%), 0 4px 12px rgb(0 0 0 / 34%)}
 .dsm-xdpool-brand-copy{display:flex;flex-direction:column;min-width:0}
@@ -943,7 +943,7 @@ export const SHELL_CSS = `
    them under the tab strip, because the strip comes first in the DOM. */
 .dsm-xdpool-nav{grid-template-columns:1fr auto auto}
 .dsm-xdpool-star{grid-column:2;grid-row:1}
-.dsm-xdpool-group{grid-column:3;grid-row:1;margin-left:6px;cursor:pointer;font:inherit;font-size:12.5px;line-height:17px;font-weight:650;color:color-mix(in srgb, var(--dsw-alias-state-business-primary,#5686fe) 82%, var(--dsw-alias-label-secondary,#c6c9d0));border-color:color-mix(in srgb, var(--dsw-alias-border-l2,#ffffff1f) 88%, transparent);background:linear-gradient(140deg, color-mix(in srgb, var(--dsw-alias-bg-layer-3,#23252b) 72%, transparent), transparent 70%)}
+.dsm-xdpool-group{grid-column:3;grid-row:1;margin-left:6px;cursor:pointer;font:inherit;font-size:12.5px;line-height:17px;font-weight:650;color:color-mix(in srgb, var(--dsw-alias-state-business-primary,#5686fe) 82%, var(--dsw-alias-label-secondary,#c6c9d0));border-color:color-mix(in srgb, var(--dsw-alias-border-l2,color-mix(in oklch, currentColor 12%, transparent)) 88%, transparent);background:linear-gradient(140deg, color-mix(in srgb, var(--dsw-alias-bg-layer-3,#23252b) 72%, transparent), transparent 70%)}
 .dsm-xdpool-group:hover{transform:translateY(-1px);color:var(--dsw-alias-state-business-primary,#5686fe);box-shadow:0 0 0 4px color-mix(in srgb, var(--dsw-alias-state-business-primary,#5686fe) 9%, transparent), 0 8px 22px rgb(0 0 0 / 22%)}
 /* The pulse is on the icon only, and slow: this button is a door, not a call to
    action, and a card that nags is a card people mute. */
@@ -958,7 +958,7 @@ export const SHELL_CSS = `
    landed half-way down the scroll), and fixed centred it as a modal (correct for a
    modal, but the ask was "show it HERE"). */
 .dsm-xdpool-groupinline{display:flex;justify-content:center}
-.dsm-xdpool-groupcard{display:flex;flex-direction:column;align-items:center;gap:10px;max-width:520px;padding:16px 18px 18px;border-radius:16px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l2,#ffffff1f) 86%, transparent);background:var(--dsw-alias-bg-layer-2,#1c1e22);box-shadow:0 18px 48px rgb(0 0 0 / 34%), inset 0 1px 0 rgb(255 255 255 / 7%)}
+.dsm-xdpool-groupcard{display:flex;flex-direction:column;align-items:center;gap:10px;max-width:520px;padding:16px 18px 18px;border-radius:16px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l2,color-mix(in oklch, currentColor 12%, transparent)) 86%, transparent);background:var(--dsw-alias-bg-layer-2,#1c1e22);box-shadow:0 18px 48px rgb(0 0 0 / 34%), inset 0 1px 0 rgb(255 255 255 / 7%)}
 /* The two codes sit side by side and WRAP to a column before either shrinks:
    a QR squeezed narrower than its module grid is a QR that stops scanning, so
    the layout gives up the row rather than the size. */
@@ -973,7 +973,7 @@ export const SHELL_CSS = `
    on some phones and not others, and there is no way to tell which from here. */
 .dsm-xdpool-groupqr{display:block;width:220px;height:220px;border-radius:12px;background:#fff;padding:6px;object-fit:contain}
 .dsm-xdpool-groupnote{width:100%;margin:0;font-size:11.5px;line-height:17px;color:var(--dsw-alias-label-tertiary,#8a90a0);text-align:center}
-.dsm-xdpool-navtabs{grid-column:1/-1;position:relative;display:flex;flex-wrap:wrap;gap:2px;padding:3px;border-radius:13px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l1,#ffffff14) 80%, transparent);background:color-mix(in srgb, var(--dsw-alias-bg-layer-1,#191a1e) 62%, transparent);box-shadow:inset 0 1px 2px rgb(0 0 0 / 4%)}
+.dsm-xdpool-navtabs{grid-column:1/-1;position:relative;display:flex;flex-wrap:wrap;gap:2px;padding:3px;border-radius:13px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l1,color-mix(in oklch, currentColor 8%, transparent)) 80%, transparent);background:color-mix(in srgb, var(--dsw-alias-bg-layer-1,#191a1e) 62%, transparent);box-shadow:inset 0 1px 2px rgb(0 0 0 / 4%)}
 /* A raised surface, not a tinted wash: the glider has to read as "this one is
    sitting on top of the strip" from across the panel, and a wash alone is
    indistinguishable from hover. */
@@ -998,7 +998,7 @@ export const SHELL_CSS = `
 /* One statistic above the usage tables: same surface language as a page
    section, a smaller radius than the hero so a row of them does not compete
    with the page title above it. */
-.dsm-xdpool-kpi{display:flex;flex-direction:column;gap:3px;padding:10px 12px;border-radius:12px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l1,#ffffff14) 100%, transparent);background:color-mix(in srgb, var(--dsw-alias-bg-layer-1,#191a1e) 78%, transparent);box-shadow:inset 0 1px 0 rgb(255 255 255 / 4%)}
+.dsm-xdpool-kpi{display:flex;flex-direction:column;gap:3px;padding:10px 12px;border-radius:12px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l1,color-mix(in oklch, currentColor 8%, transparent)) 100%, transparent);background:color-mix(in srgb, var(--dsw-alias-bg-layer-1,#191a1e) 78%, transparent);box-shadow:inset 0 1px 0 rgb(255 255 255 / 4%)}
 .dsm-xdpool-kpi-label{font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,#8a90a0)}
 .dsm-xdpool-kpi-value{display:block;font-size:16px;line-height:23px;font-weight:700;letter-spacing:-.3px;color:var(--dsw-alias-label-primary,#e8e8ea);font-variant-numeric:tabular-nums}
 .dsm-xdpool-kpi-sub{font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary,#c6c9d0)}
@@ -1111,7 +1111,7 @@ export const GATEWAY_CARD_CSS = `
 .dsm-xdpool-gw-field>select:focus-visible,.dsm-xdpool-gw-field>input:focus-visible{outline:none;border-color:var(--dsw-alias-brand-primary,#5686fe);box-shadow:0 0 0 3px color-mix(in srgb, var(--dsw-alias-brand-primary,#5686fe) 20%, transparent)}
 .dsm-xdpool-gw-key{margin:0;font-family:var(--dsw-alias-font-mono,ui-monospace,Menlo,Consolas,monospace);font-size:12px;line-height:18px;color:var(--dsw-alias-label-primary,#e8e8ea);word-break:break-all;user-select:all}
 .dsm-xdpool-gw-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.dsm-xdpool-gw-flash{margin:0;padding:6px 10px;border-radius:9px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l1,#ffffff14) 70%, transparent);background:color-mix(in srgb, var(--dsw-alias-bg-layer-1,#191a1e) 72%, transparent);color:var(--dsw-alias-label-secondary,#c6c9d0);font-size:11px;line-height:17px;word-break:break-word}
+.dsm-xdpool-gw-flash{margin:0;padding:6px 10px;border-radius:9px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l1,color-mix(in oklch, currentColor 8%, transparent)) 70%, transparent);background:color-mix(in srgb, var(--dsw-alias-bg-layer-1,#191a1e) 72%, transparent);color:var(--dsw-alias-label-secondary,#c6c9d0);font-size:11px;line-height:17px;word-break:break-word}
 .dsm-xdpool-gw-btn{appearance:none;display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:11.5px;font-weight:560;line-height:17px;padding:4px 12px;border-radius:8px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l2,#36373b) 85%, transparent);background:color-mix(in srgb, var(--dsw-alias-bg-layer-3,#2a2c33) 70%, transparent);color:var(--dsw-alias-label-secondary,#c6c9d0);cursor:pointer;white-space:nowrap;transition:border-color .16s ease,color .16s ease,background .16s ease,transform .18s var(--ease-instrument,cubic-bezier(.16,1,.3,1))}
 /* The gateway's shared-model picker. Grouped by lane, and each row carries BOTH
    the display name and the wire id, because for the login channels they are
@@ -1244,7 +1244,7 @@ export const SHARED_CARD_CSS = `
 .dsm-xdpool-agg-search{flex:1 1 220px;min-width:0;padding:6px 10px;border-radius:9px;border:1px solid var(--dsw-alias-border-l2,#36373b);background:color-mix(in srgb, var(--dsw-alias-bg-layer-1,#191a1e) 78%, transparent);box-shadow:inset 0 1px 2px rgb(0 0 0 / 5%);color:var(--dsw-alias-label-primary,#e8e8ea);font:inherit;font-size:12px}
 .dsm-xdpool-agg-search:focus{outline:none;border-color:var(--dsw-alias-brand-primary,#5686fe);box-shadow:0 0 0 3px color-mix(in srgb, var(--dsw-alias-brand-primary,#5686fe) 20%, transparent)}
 .dsm-xdpool-agg-cats{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
-.dsm-xdpool-agg-cat{appearance:none;font:inherit;font-size:11px;line-height:16px;padding:3px 10px;border-radius:999px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l1,#ffffff14) 70%, transparent);background:color-mix(in srgb, var(--dsw-alias-bg-layer-1,#191a1e) 72%, transparent);color:var(--dsw-alias-label-secondary,#c6c9d0);cursor:pointer;transition:border-color .16s ease,color .16s ease,background .16s ease}
+.dsm-xdpool-agg-cat{appearance:none;font:inherit;font-size:11px;line-height:16px;padding:3px 10px;border-radius:999px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l1,color-mix(in oklch, currentColor 8%, transparent)) 70%, transparent);background:color-mix(in srgb, var(--dsw-alias-bg-layer-1,#191a1e) 72%, transparent);color:var(--dsw-alias-label-secondary,#c6c9d0);cursor:pointer;transition:border-color .16s ease,color .16s ease,background .16s ease}
 .dsm-xdpool-agg-cat:hover{border-color:color-mix(in srgb, var(--dsw-alias-brand-primary,#5686fe) 66%, var(--dsw-alias-border-l2,#36373b));color:var(--dsw-alias-label-primary,#e8e8ea)}
 .dsm-xdpool-agg-cat[data-on="true"]{border-color:color-mix(in srgb, currentColor 55%, transparent);background:color-mix(in srgb, var(--dsw-alias-bg-layer-2,#1c1e22) 70%, transparent)}
 .dsm-xdpool-agg-tags{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
@@ -1264,8 +1264,8 @@ export const SHARED_CARD_CSS = `
 .dsm-xdpool-sectitle{margin:0;font-size:12px;font-weight:680;line-height:18px;letter-spacing:.2px;color:var(--dsw-alias-label-secondary,#c6c9d0);display:flex;align-items:center;gap:8px}
 .dsm-xdpool-tablewrap{overflow-x:auto;max-width:100%}
 .dsm-xdpool-table{width:100%;min-width:760px;border-collapse:collapse;font-size:11.5px;line-height:17px}
-.dsm-xdpool-table th{text-align:left;font-weight:560;font-size:10.5px;letter-spacing:.4px;text-transform:uppercase;color:var(--dsw-alias-label-tertiary,#8a90a0);padding:0 10px 8px;border-bottom:1px solid color-mix(in srgb, var(--dsw-alias-border-l1,#ffffff14) 70%, transparent);white-space:nowrap}
-.dsm-xdpool-table td{padding:7px 10px;border-bottom:1px solid color-mix(in srgb, var(--dsw-alias-border-l1,#ffffff14) 62%, transparent);color:var(--dsw-alias-label-secondary,#c6c9d0);font-variant-numeric:tabular-nums}
+.dsm-xdpool-table th{text-align:left;font-weight:560;font-size:10.5px;letter-spacing:.4px;text-transform:uppercase;color:var(--dsw-alias-label-tertiary,#8a90a0);padding:0 10px 8px;border-bottom:1px solid color-mix(in srgb, var(--dsw-alias-border-l1,color-mix(in oklch, currentColor 8%, transparent)) 70%, transparent);white-space:nowrap}
+.dsm-xdpool-table td{padding:7px 10px;border-bottom:1px solid color-mix(in srgb, var(--dsw-alias-border-l1,color-mix(in oklch, currentColor 8%, transparent)) 62%, transparent);color:var(--dsw-alias-label-secondary,#c6c9d0);font-variant-numeric:tabular-nums}
 .dsm-xdpool-table tbody tr:last-child td{border-bottom:none}
 .dsm-xdpool-table tbody tr[data-ok="false"] td{color:var(--dsw-alias-state-error-primary,#ef4444)}
 /* Numeric columns, header AND cells together.
@@ -1580,7 +1580,7 @@ export const CREDIT_DOT_CSS = `
 .dsm-xdpool-dot:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:3px}
 /* Measured coordinates, not flow: the composer sits at the bottom of the viewport, so a
    panel laid out downward would be clipped. */
-.dsm-xdpool-dotpanel{position:fixed;z-index:80;width:max-content;min-width:172px;max-width:min(280px,calc(100vw - 24px));display:flex;flex-direction:column;gap:7px;padding:10px 12px 11px;border-radius:14px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l2,#ffffff1f) 92%, transparent);background:var(--dsw-alias-bg-layer-2,#1c1e22);box-shadow:0 18px 48px rgb(0 0 0 / 44%),0 3px 10px rgb(0 0 0 / 24%),inset 0 1px 0 rgb(255 255 255 / 7%);animation:dsm-xdpool-dotpanel-in .16s cubic-bezier(.16,1,.3,1)}
+.dsm-xdpool-dotpanel{position:fixed;z-index:80;width:max-content;min-width:172px;max-width:min(280px,calc(100vw - 24px));display:flex;flex-direction:column;gap:7px;padding:10px 12px 11px;border-radius:14px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l2,color-mix(in oklch, currentColor 12%, transparent)) 92%, transparent);background:var(--dsw-alias-bg-layer-2,#1c1e22);box-shadow:0 18px 48px rgb(0 0 0 / 44%),0 3px 10px rgb(0 0 0 / 24%),inset 0 1px 0 rgb(255 255 255 / 7%);animation:dsm-xdpool-dotpanel-in .16s cubic-bezier(.16,1,.3,1)}
 @keyframes dsm-xdpool-dotpanel-in{from{opacity:0;transform:translateY(5px) scale(.985)}to{opacity:1;transform:none}}
 .dsm-xdpool-dotpanel-head{display:flex;align-items:center;gap:8px;min-width:0}
 .dsm-xdpool-dotpanel-channel{font-size:12.5px;font-weight:600;letter-spacing:.01em;color:var(--dsw-alias-label-primary,#e8eaf0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
@@ -1596,7 +1596,7 @@ export const CREDIT_DOT_CSS = `
 .dsm-xdpool-dotbar{height:4px;border-radius:999px;overflow:hidden;background:color-mix(in srgb, var(--dsw-alias-label-tertiary,#8a90a0) 22%, transparent);margin:1px 0 2px}
 .dsm-xdpool-dotbar-fill{height:100%;border-radius:999px;background:#22c55e;transition:width .3s cubic-bezier(.16,1,.3,1),background-color .2s ease}
 .dsm-xdpool-dotbar-fill[data-full='true']{background:#f59e0b}
-.dsm-xdpool-dotpanel-more{display:flex;flex-direction:column;gap:2px;padding-top:6px;margin-top:1px;border-top:1px solid color-mix(in srgb, var(--dsw-alias-border-l2,#ffffff1f) 62%, transparent)}
+.dsm-xdpool-dotpanel-more{display:flex;flex-direction:column;gap:2px;padding-top:6px;margin-top:1px;border-top:1px solid color-mix(in srgb, var(--dsw-alias-border-l2,color-mix(in oklch, currentColor 12%, transparent)) 62%, transparent)}
 .dsm-xdpool-dotpanel-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;font-size:11px;line-height:16px}
 .dsm-xdpool-dotpanel-rowname{color:var(--dsw-alias-label-tertiary,#8a90a0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* The channel that served today gets a brighter label; the rest still count
@@ -1616,7 +1616,7 @@ export const CREDIT_DOT_CSS = `
  * it, so the row offered three "choose file" controls for one action.
  */
 export const BACKUP_CSS = `
-.dsm-xdpool-bak{display:flex;flex-direction:column;gap:8px;padding:12px 14px 13px;border-radius:12px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l2,#ffffff1f) 82%, transparent);background:color-mix(in srgb, var(--dsw-alias-bg-layer-2,#1c1e22) 72%, transparent);min-width:0}
+.dsm-xdpool-bak{display:flex;flex-direction:column;gap:8px;padding:12px 14px 13px;border-radius:12px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l2,color-mix(in oklch, currentColor 12%, transparent)) 82%, transparent);background:color-mix(in srgb, var(--dsw-alias-bg-layer-2,#1c1e22) 72%, transparent);min-width:0}
 .dsm-xdpool-bak-head{display:flex;align-items:center;gap:8px;min-width:0}
 .dsm-xdpool-bak-title{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary,#e8eaf0)}
 /* A one-word badge, not a sentence: the fact that the file is encrypted is worth a
@@ -1625,11 +1625,11 @@ export const BACKUP_CSS = `
 .dsm-xdpool-bak-hint{margin:0;font-size:11px;line-height:17px;color:var(--dsw-alias-label-tertiary,#8a90a0)}
 .dsm-xdpool-bak-field{display:flex;align-items:center;gap:8px;min-width:0}
 .dsm-xdpool-bak-label{font-size:11px;color:var(--dsw-alias-label-secondary,#b9bfcc);white-space:nowrap;flex:none}
-.dsm-xdpool-bak-input{flex:1 1 auto;min-width:0;max-width:220px;appearance:none;-webkit-appearance:none;padding:5px 9px;border-radius:7px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l2,#ffffff1f) 92%, transparent);background:color-mix(in srgb, var(--dsw-alias-bg-layer-1,#191a1e) 88%, transparent);color:var(--dsw-alias-label-primary,#e8eaf0);font-size:12px;line-height:17px;font-family:inherit}
+.dsm-xdpool-bak-input{flex:1 1 auto;min-width:0;max-width:220px;appearance:none;-webkit-appearance:none;padding:5px 9px;border-radius:7px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l2,color-mix(in oklch, currentColor 12%, transparent)) 92%, transparent);background:color-mix(in srgb, var(--dsw-alias-bg-layer-1,#191a1e) 88%, transparent);color:var(--dsw-alias-label-primary,#e8eaf0);font-size:12px;line-height:17px;font-family:inherit}
 .dsm-xdpool-bak-input:focus{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:1px;border-color:transparent}
 .dsm-xdpool-bak-input::placeholder{color:var(--dsw-alias-label-tertiary,#8a90a0);opacity:.75}
 .dsm-xdpool-bak-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.dsm-xdpool-bak-btn{appearance:none;-webkit-appearance:none;padding:5px 13px;border-radius:7px;cursor:pointer;font:inherit;font-size:12px;line-height:18px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l2,#ffffff1f) 95%, transparent);background:transparent;color:var(--dsw-alias-label-secondary,#b9bfcc);transition:border-color .15s ease,background-color .15s ease,color .15s ease;white-space:nowrap}
+.dsm-xdpool-bak-btn{appearance:none;-webkit-appearance:none;padding:5px 13px;border-radius:7px;cursor:pointer;font:inherit;font-size:12px;line-height:18px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l2,color-mix(in oklch, currentColor 12%, transparent)) 95%, transparent);background:transparent;color:var(--dsw-alias-label-secondary,#b9bfcc);transition:border-color .15s ease,background-color .15s ease,color .15s ease;white-space:nowrap}
 .dsm-xdpool-bak-btn:hover:not(:disabled){border-color:color-mix(in srgb, var(--dsw-alias-brand-primary,#5686fe) 55%, transparent);color:var(--dsw-alias-label-primary,#e8eaf0)}
 .dsm-xdpool-bak-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5686fe);outline-offset:2px}
 .dsm-xdpool-bak-btn:disabled{opacity:.45;cursor:not-allowed}
@@ -1643,7 +1643,7 @@ export const BACKUP_CSS = `
 .dsm-xdpool-bak-clear:hover{background:color-mix(in srgb, var(--dsw-alias-label-primary,#e8eaf0) 12%, transparent);color:var(--dsw-alias-label-primary,#e8eaf0)}
 .dsm-xdpool-bak-note{margin:0;font-size:11px;line-height:16px;color:var(--dsw-alias-state-success-primary,#22a06b)}
 .dsm-xdpool-bak-error{margin:0;font-size:11px;line-height:16px;color:var(--dsw-alias-state-error-primary,#e5534b)}
-.dsm-xdpool-update{display:flex;flex-direction:column;gap:8px;margin:0 0 14px;padding:12px 14px;border-radius:12px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l2,#ffffff1f) 82%, transparent);background:color-mix(in srgb, var(--dsw-alias-bg-layer-2,#1c1e22) 60%, transparent)}
+.dsm-xdpool-update{display:flex;flex-direction:column;gap:8px;margin:0 0 14px;padding:12px 14px;border-radius:12px;border:1px solid color-mix(in srgb, var(--dsw-alias-border-l2,color-mix(in oklch, currentColor 12%, transparent)) 82%, transparent);background:color-mix(in srgb, var(--dsw-alias-bg-layer-2,#1c1e22) 60%, transparent)}
 .dsm-xdpool-update-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .dsm-xdpool-update-title{font-size:13px;font-weight:650;color:var(--dsw-alias-label-primary,#e8eaf0)}
 .dsm-xdpool-update-versions{font-size:11.5px;color:var(--dsw-alias-label-tertiary,#8a90a0);font-variant-numeric:tabular-nums}
