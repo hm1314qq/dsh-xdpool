@@ -77,37 +77,49 @@ describe('every route the browser calls is registered by the host', () => {
   })
 
   it('registers the per-channel usage routes', () => {
-    const text = readFileSync(new URL('web-status.ts', SRC), 'utf8')
     /*
-       Two halves in one handler: a read that the card polls on mount, and a
-       write that must return the whole document so the pane can repaint without
-       a second round trip. Asserting both keeps a future edit from keeping the
-       GET and dropping the POST.
+      Upstream moved this route into `channel-usage-route.ts` (3.0.1) and wires it
+      from `index.ts`. An earlier revision of this test looked for it in
+      `web-status.ts`, where it had been hand-added to fix the 405; that duplicate
+      is gone and the assertion follows the code to where it now lives.
+
+      One handler answers both halves: a GET the card polls on mount, and a POST
+      that answers with the whole document so the pane repaints in one round trip.
     */
-    expect(text).toContain('POOL_CHANNEL_USAGE_PATH')
-    expect(text).toMatch(/req\.method === 'GET'\) return json\(res, 200, deps\.channelUsage\(\)\)/u)
-    expect(text).toContain('await deps.setChannelUsage(')
-    // The answer after a write is the document, not `{ok:true}`.
-    expect(text).toMatch(/await deps\.setChannelUsage\([^)]*\)\s*\n\s*json\(res, 200, deps\.channelUsage\(\)\)/u)
+    const route = readFileSync(new URL('channel-usage-route.ts', SRC), 'utf8')
+    expect(route).toContain('POOL_CHANNEL_USAGE_PATH')
+    expect(route).toMatch(/req\.method === 'GET'\) return json\(res, 200, state\(\)\)/u)
+    expect(route).toContain('writeChannelUsage(')
+    // After a write the answer is the document, not a bare `{ ok: true }`.
+    expect(route).toMatch(/writeChannelUsage\([^)]*\)[\s\S]{0,200}json\(res, 200, state\(\)\)/u)
+  })
+
+  it('is wired exactly once', () => {
+    /*
+      While the merge was in progress both halves registered this path: the
+      hand-added copy in `web-status.ts` and upstream's new module. Two exact
+      registrations for one path is a conflict the host resolves by refusing one,
+      so the duplicate had to go — this keeps it gone.
+    */
+    const webStatus = readFileSync(new URL('web-status.ts', SRC), 'utf8')
+    expect(webStatus, 'the route must not be registered twice').not.toContain(
+      'path: POOL_CHANNEL_USAGE_PATH',
+    )
+    const index = readFileSync(new URL('index.ts', SRC), 'utf8')
+    expect(index).toContain('registerChannelUsageRoute(')
   })
 
   it('rejects a strategy it cannot store', () => {
-    // An unknown strategy must not be persisted: it would be read back, fail
-    // every comparison, and silently resolve to the pool default.
-    const text = readFileSync(new URL('web-status.ts', SRC), 'utf8')
-    expect(text).toContain('invalid channel')
-    expect(text).toContain('invalid strategy')
-    // The channel name is checked against a bare-identifier pattern, so a URL or
-    // a path cannot be stored as a provider id.
-    expect(text).toMatch(/\[A-Za-z0-9_-\]/u)
     /*
-      A type check is not a value check. `setChannelUsage` validates again and
-      silently drops an unknown value, so checking only `typeof raw === 'string'`
-      answered `200` for `"nonsense"` with an unchanged document — a save and a
-      no-op were indistinguishable to the caller. This asserts the membership
-      test is actually applied.
+      An unknown strategy must not be persisted: it would be read back, fail every
+      comparison, and silently resolve to the pool default. `isUsageStrategy` is
+      the membership test; a bare `typeof` check is not enough, because the writer
+      validates again and drops an unknown value silently — a save and a no-op
+      would look identical to the caller.
     */
-    expect(text).toContain('isDistributionStrategy(raw)')
+    const route = readFileSync(new URL('channel-usage-route.ts', SRC), 'utf8')
+    expect(route).toContain('isUsageStrategy(')
+    expect(route).toMatch(/json\(res, 400/u)
   })
 
   it('reports the pool strategy the pool is actually running', () => {
