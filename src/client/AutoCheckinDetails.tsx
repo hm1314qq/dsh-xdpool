@@ -1,36 +1,39 @@
 /**
- * The auto-check-in claim ledger, as a PAGE.
+ * The auto-check-in claim ledger.
  *
- * WHY A PAGE AND NOT A DIALOG
+ * The reader opens this to answer one question: who collected what, who
+ * failed, and why. So the shape borrows from a receipt: a headline total, one
+ * line per account with the vendor's own amount, and the upstream's failure
+ * message quoted underneath.
  *
- * This started as a dialog opened from the channel's automation panel. The
- * dialog could only answer "what happened in the run I am looking at" — it
- * covered the pool while open, and the whole point of a ledger is comparison:
- * across runs, across channels, across accounts. A dialog you have to dismiss
- * to see the pool again cannot be read that way.
+ * IT IS BUILT FROM THE 3.0 DIALOG VOCABULARY, NOT ITS OWN STYLESHEET
  *
- * So it is a rail page, next to Dashboard and Routing. The rail is the plugin's
- * own "everything, at a glance" surface, and a claim ledger belongs there.
+ * This component used to ship a private `.dsm-xdpool-ledger-*` sheet injected
+ * by a `<style>` tag. 3.0 consolidated every page onto one injected sheet and a
+ * single class vocabulary (`.pick*` for a dialog, `.btn`, `.pill`, `.hint`), and
+ * `tests/bundle-contract.test.ts` now fails a component that injects its own —
+ * rightly: a second stylesheet is a second set of tokens to keep in sync.
  *
- * IT REUSES THE 3.0 VOCABULARY
+ * So the markup reuses the same skeleton the aggregate page's model picker
+ * uses (scrim → `.pick` → `.pick-head` → `.pick-tools` → scrolling body →
+ * `.pick-foot`), and the only rules that are genuinely new — a dotted leader
+ * between the account and its amount, the group tone — live in `styles.ts`
+ * under `.ledger-*`, which is part of that one sheet.
  *
- * `main.mhead` + `mbody` like every other page, and the receipt rows keep the
- * `.ledger-*` rules (dotted leader, group tone) from the shared sheet. The only
- * page-specific decisions are: the run picker and "claim now" live in the
- * header, and the summary counts sit above the groups so the reader sees totals
- * before detail.
+ * Behavioural notes learned the hard way:
  *
- * @module dsh-xdpool/client/AutoCheckinPage
+ *  1. The dialog owns no fetching. The parent refreshes on open and after a
+ *     manual run, so there is exactly one source of truth.
+ *  2. When the live snapshot has no rows but history does, the picker defaults
+ *     to the newest run — "empty" should never be the first thing a reader
+ *     sees when data exists one click away.
+ *  3. An explicit pick is never stolen: the auto-jump fires only while the
+ *     reader is still on `live` AND live is empty.
+ *
+ * @module dsh-xdpool/client/AutoCheckinDetails
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
-import {
-  autoCheckinFrom,
-  callPack,
-  runAutoCheckin,
-  type ChannelAutoCheckin,
-  type ChannelAutoCheckinDetail,
-  type ChannelAutoCheckinRun,
-} from './channel-rpc.ts'
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import type { ChannelAutoCheckinDetail, ChannelAutoCheckinRun } from './channel-rpc.ts'
 import type { XdPoolSettingsKey } from './locales.ts'
 
 type Translate = (key: XdPoolSettingsKey, params?: Record<string, unknown>) => string
@@ -74,84 +77,73 @@ function runLabel(run: ChannelAutoCheckinRun): string {
   return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-export interface AutoCheckinPageProps {
-  t?: Translate | undefined
+interface LedgerProps {
+  /** Breakdown of the current/last run. */
+  rows: readonly ChannelAutoCheckinDetail[]
+  /** Rolling history, oldest first. */
+  history: readonly ChannelAutoCheckinRun[]
+  /** Epoch ms of the last completed run. */
+  lastAt?: number | undefined
+  /** True while a manual pass is in flight; disables the action. */
+  running: boolean
   /** Provider id → display name, so rows read "Qoder 中国版", not "qodercn". */
-  names?: Record<string, string> | undefined
+  names: Record<string, string> | undefined
+  t?: Translate | undefined
+  onClose: () => void
+  /** Force one batch claim; the parent refreshes state afterwards. */
+  onRunNow: () => void
 }
 
-export function AutoCheckinPage({ t, names }: AutoCheckinPageProps): ReactElement {
-  const [state, setState] = useState<ChannelAutoCheckin | undefined>(undefined)
-  const [error, setError] = useState<string | undefined>(undefined)
-  const [running, setRunning] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const mounted = useRef(true)
-  useEffect(() => {
-    mounted.current = true
-    return () => { mounted.current = false }
-  }, [])
-
+export function AutoCheckinDetailsDialog({
+  rows,
+  history,
+  lastAt,
+  running,
+  names,
+  t,
+  onClose,
+  onRunNow,
+}: LedgerProps): ReactElement {
+  const panelRef = useRef<HTMLDivElement | null>(null)
   /**
    * Which run is on the receipt. `live` is the current snapshot; an index
    * points into history. If the live snapshot is empty but history is not,
    * start on the newest run — data one click away must not read as "none".
    */
-  const [selected, setSelected] = useState<string>('live')
-
-  const load = useCallback(async (): Promise<void> => {
-    try {
-      const envelope = await callPack('usage.autoCheckin', {})
-      if (!mounted.current) return
-      setState(autoCheckinFrom(envelope))
-      setError(undefined)
-    } catch (cause) {
-      // The pack not answering is not a page failure: the switch stays absent
-      // and the reader is told why, rather than shown an empty receipt.
-      if (mounted.current) setError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      if (mounted.current) setLoading(false)
-    }
-  }, [])
-  useEffect(() => { void load() }, [load])
-
-  const rows = state?.details ?? []
-  const history = state?.history ?? []
-
-  /** Rule 3 from the original dialog, unchanged: never steal an explicit pick. */
+  const [selected, setSelected] = useState<string>(() => (
+    rows.length > 0 || history.length === 0 ? 'live' : String(history.length - 1)
+  ))
+  /**
+   * Rule 3 from the header, applied WITHOUT stealing an explicit pick: only
+   * move the reader when they are still on `live` AND live is empty AND
+   * history has something. A reader who deliberately selected an older run
+   * must not be yanked back to "最近一轮" the moment a manual run completes
+   * (a new history entry bumps `history.length`); they can see the fresh run
+   * by clicking the picker, and the empty-live jump still fires on return.
+   */
   useEffect(() => {
     if (selected !== 'live') return
     if (rows.length > 0) return
     if (history.length > 0) setSelected(String(history.length - 1))
   }, [selected, rows.length, history.length])
-
-  /**
-   * Force one pass. The scheduled run refuses a second pass on the same day, so
-   * this is the only way to retry an account that failed this morning.
-   */
-  const runNow = useCallback(async (): Promise<void> => {
-    setRunning(true)
-    try {
-      const next = await runAutoCheckin()
-      if (!mounted.current) return
-      /*
-        An error envelope is NOT a throw: `runAutoCheckin` folds the pack's
-        `{ok:false}` into `undefined`, so swallowing it here would repaint the
-        page with stale data and say nothing.
-      */
-      if (next === undefined) {
-        setError('强制领取失败（pack 没有返回新的账本）')
-        return
-      }
-      setState(next)
-      setError(undefined)
-      // A fresh pass becomes the newest history entry; show it.
-      setSelected('live')
-    } catch (cause) {
-      if (mounted.current) setError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      if (mounted.current) setRunning(false)
+  /** Escape and outside-click, the two ways any dialog on this host closes. */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') onClose()
     }
-  }, [])
+    const onPointer = (event: MouseEvent): void => {
+      const target = event.target as Node | null
+      if (target === null) return
+      if (panelRef.current?.contains(target) === true) return
+      onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onPointer, true)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('mousedown', onPointer, true)
+    }
+  }, [onClose])
 
   const shownRows = useMemo(() => {
     if (selected === 'live') return rows
@@ -160,11 +152,12 @@ export function AutoCheckinPage({ t, names }: AutoCheckinPageProps): ReactElemen
   }, [selected, rows, history])
 
   /**
-   * The run the headline totals describe — ONLY when those totals actually
-   * describe what is shown. On `live` with rows the newest ancestor is the right
-   * headline; on `live` with NO rows that ancestor's total would describe
-   * nothing visible, so the headline is withheld rather than allowed to
-   * disagree with the body.
+   * The run the header totals describe — ONLY when those totals actually
+   * describe what is shown. On `live` with rows, the live snapshot has no
+   * aggregate of its own and the newest ancestor is the right headline; on
+   * `live` with NO rows, that ancestor's total (possibly a ×N-collapsed run)
+   * next to an empty receipt is a number describing nothing visible, so the
+   * headline is withheld rather than allowed to disagree with the body.
    */
   const headerRun = useMemo(() => {
     if (selected !== 'live') return history[Number(selected)]
@@ -179,25 +172,66 @@ export function AutoCheckinPage({ t, names }: AutoCheckinPageProps): ReactElemen
     return map
   }, [shownRows])
 
-  /** Headline counts: how many channels / accounts this run touched, and how it went. */
-  const channels = useMemo(() => new Set(shownRows.map(row => row.provider)).size, [shownRows])
-  const accounts = shownRows.length
-  const totalCredit = headerRun?.totals?.credit ?? 0
-  const failedCount = grouped.failed.length
-  const whenText = state?.lastAt === undefined
+  const title = t?.('auto.details.title') ?? '领取详情'
+  const whenText = lastAt === undefined
     ? (t?.('auto.details.noRun') ?? '还没有完成过领取。')
-    : new Date(state.lastAt).toLocaleString()
+    : new Date(lastAt).toLocaleString()
+  const totalCredit = headerRun?.totals?.credit ?? 0
+  const totalAccounts = shownRows.length
 
   return (
-    <main className="main">
-      <header className="mhead">
-        <div className="mhead-title">
-          <span className="mhead-name">{t?.('auto.details.title') ?? '领取详情'}</span>
-          <span className="mhead-org">
-            {`逐账号领取账本 · ${whenText}`}
-          </span>
+    /*
+      覆盖层与聚合页的模型选择器同构：固定铺满 + oklch 遮罩，点击遮罩关闭。
+      用 role="presentation" 而不是 dialog —— 遮罩本身不是可聚焦的对话框。
+    */
+    <div
+      role="presentation"
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 80,
+        display: 'grid',
+        placeItems: 'center',
+        padding: 'var(--s5)',
+        background: 'oklch(0% 0 0 / 0.45)',
+      }}
+    >
+      <div
+        ref={panelRef}
+        className="pick"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        style={{ maxHeight: 'calc(100vh - 48px)', height: 'auto', width: 'min(560px, 100%)' }}
+        onClick={event => { event.stopPropagation() }}
+      >
+        {/* ── Head: what ran, when, and the number that matters ── */}
+        <div className="pick-head">
+          <span className="pick-title">{title}</span>
+          {/*
+            总额只在它真的描述下面的行时才出现（见 headerRun 的注释）。
+            单位跟在数字后面，和账号行的单位是同一个词。
+          */}
+          {headerRun === undefined ? null : (
+            <span className="pick-sum" title={headerRun.result}>
+              <b>{totalCredit > 0 ? `+${String(totalCredit)}` : String(totalCredit)}</b>
+              {' '}{t?.('auto.details.creditUnit') ?? '积分'}
+            </span>
+          )}
+          <button
+            type="button"
+            className="pick-close"
+            aria-label={t?.('auto.details.close') ?? '关闭'}
+            onClick={onClose}
+          >
+            ×
+          </button>
         </div>
-        <div className="mhead-actions">
+
+        {/* ── Toolbar: switch runs, or force a new pass ── */}
+        <div className="pick-tools">
+          <span className="pick-sum">{whenText}</span>
           <label className="ledger-pick">
             <span>{t?.('auto.details.run') ?? '轮次'}</span>
             <select
@@ -217,70 +251,26 @@ export function AutoCheckinPage({ t, names }: AutoCheckinPageProps): ReactElemen
           </label>
           <button
             type="button"
-            className="btn btn-primary"
+            className="tiny tiny-primary"
+            style={{ marginLeft: 'auto' }}
             disabled={running}
-            onClick={() => { void runNow() }}
+            onClick={onRunNow}
           >
             {running
               ? (t?.('auto.details.running') ?? '领取中…')
               : (t?.('auto.details.runNow') ?? '立即领取')}
           </button>
         </div>
-      </header>
 
-      <div className="mbody">
-        {error === undefined ? null : (
-          <div className="hint" role="alert"><b>提示</b><span>{error}</span></div>
-        )}
-
-        {/*
-          The headline numbers sit above the groups: a ledger is read totals-first,
-          then the lines that make them up. Same .kpis component every other page
-          uses, so it lines up with the pool's own stat row.
-        */}
-        <div className="kpis" style={{ gridTemplateColumns: 'repeat(4,minmax(0,1fr))' }}>
-          <div className="kpi">
-            <span className="kpi-k">渠道</span>
-            <span className="kpi-v num">{loading ? '…' : String(channels)}</span>
-          </div>
-          <div className="kpi">
-            <span className="kpi-k">账号</span>
-            <span className="kpi-v num">{loading ? '…' : String(accounts)}</span>
-          </div>
-          <div className="kpi">
-            <span className="kpi-k">{t?.('auto.details.success') ?? '领取成功'}</span>
-            <span className="kpi-v num">{loading ? '…' : String(grouped.success.length)}</span>
-          </div>
-          <div className="kpi">
-            <span className="kpi-k">{t?.('auto.details.failed') ?? '领取失败'}</span>
-            <span className="kpi-v num" data-tone={failedCount > 0 ? 'err' : undefined}>
-              {loading ? '…' : String(failedCount)}
-            </span>
-          </div>
-        </div>
-
-        {/* The receipt itself. */}
-        <section className="sec">
-          <div className="sec-head">
-            <span className="sec-title">逐账号</span>
-            <span className="sec-n num">{String(accounts)}</span>
-            {headerRun === undefined ? null : (
-              <span className="sec-actions">
-                <span className="hint" title={headerRun.result}>
-                  {`本轮合计 ${totalCredit > 0 ? `+${String(totalCredit)}` : String(totalCredit)} ${t?.('auto.details.creditUnit') ?? '积分'}`}
-                </span>
-              </span>
-            )}
-          </div>
-
-          {accounts === 0 && !loading && (
-            <p className="hint">
+        {/* ── The receipt body ── */}
+        <div className="pick-list">
+          {totalAccounts === 0 && (
+            <p className="hint" style={{ margin: 'var(--s2)' }}>
               {history.length === 0
                 ? (t?.('auto.details.empty') ?? '还没有逐账号记录。点「立即领取」跑一轮，或等下一次定时领取。')
                 : (t?.('auto.details.runEmpty') ?? '这一轮没有记录到逐账号明细。')}
             </p>
           )}
-
           {GROUPS.map(group => {
             const items = grouped[group]
             if (items.length === 0) return null
@@ -289,6 +279,10 @@ export function AutoCheckinPage({ t, names }: AutoCheckinPageProps): ReactElemen
                 : group === 'failed' ? (t?.('auto.details.failed') ?? '领取失败')
                   : (t?.('auto.details.other') ?? '暂不可领 / 已跳过')
             return (
+              /*
+                分组标题用 .sec-head 那套排版（衬线标题 + 右侧计数），
+                data-tone 决定小圆点的颜色 —— 与渠道卡的 pill 同一套语义。
+              */
               <section key={group} className="ledger-group" data-tone={group}>
                 <h4 className="ledger-grouphead">
                   <span className="ledger-dot" aria-hidden="true" />
@@ -328,8 +322,8 @@ export function AutoCheckinPage({ t, names }: AutoCheckinPageProps): ReactElemen
               </section>
             )
           })}
-        </section>
+        </div>
       </div>
-    </main>
+    </div>
   )
 }

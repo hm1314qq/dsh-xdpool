@@ -2,83 +2,84 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 
 /**
- * The claim ledger is a rail PAGE, not a dialog.
+ * The claim ledger opens as a DIALOG from the account pool header.
  *
  * WHY THIS IS PINNED
  *
- * It shipped first as a modal opened from a channel's automation panel. A modal
- * can only answer "what happened in the run I am looking at": it covers the pool
- * while open, and comparing runs and channels is the entire reason to read a
- * ledger. So it moved to the rail, where the other "read everything" pages live.
+ * It has been through three shapes, and each move was a correction, so the
+ * current one is worth writing down:
  *
- * Two things can regress silently and both are asserted here:
- *   1. The page falling out of the rail — it would still compile, still be
- *      reachable from the channel panel, and only the rail row would be missing.
- *   2. A dialog creeping back in — the old component is deleted, so a re-added
- *      `<style>` block or a `position: fixed` scrim would be the first sign.
+ *   1. a modal opened from a channel's automation panel — too far from the
+ *      numbers it explains;
+ *   2. a rail page — right idea about "see everything", wrong place: the rail is
+ *      the page switcher, and reading a ledger is not changing where you stand;
+ *   3. a dialog opened from the pool's own header row, beside
+ *      「13 账号总数 · 12 已连 · 2.6 万积分」 — the ledger answers the fourth
+ *      question that row implies, and closing it returns you to where you were.
+ *
+ * Three things can regress silently:
+ *   - the entry drifting out of the header row;
+ *   - the dialog turning back into a page jump (losing the pool context);
+ *   - a component re-injecting its own stylesheet, which `bundle-contract`
+ *     forbids and which was the original reason the sheet moved into `styles.ts`.
  */
 
 const SRC = new URL('../src/client/', import.meta.url)
 const read = (name: string): string => readFileSync(new URL(name, SRC), 'utf8')
 
-describe('the claim ledger opens from the account pool header', () => {
+describe('the claim ledger is a dialog opened from the pool header', () => {
   it('puts its entry in the pool list header, beside the three stats', () => {
     /*
-      The entry belongs on the row that already says「账号池 · 13 账号 · 12 已连 ·
-      2.6 万积分」: the ledger answers the fourth question that row implies —
-      where those credits came from. A rail tab was tried first and rejected:
-      the rail is the plugin's page switcher, and this is a reading of the pool,
-      not a second place to stand.
+      `list-head` holds the title row and the stats row; the entry belongs after
+      the stats and before `list-scroll`, so it sits on the header rather than
+      scrolling away with the channel list.
     */
     const section = read('ChannelPoolSection.tsx')
     const head = section.slice(section.indexOf('className="list-stats"'))
     const beforeScroll = head.slice(0, head.indexOf('list-scroll'))
-    expect(beforeScroll, 'the entry must sit inside .list-head').toContain('onOpenCheckin')
+    expect(beforeScroll, 'the entry must sit inside .list-head').toContain('openAutoDetails')
     expect(beforeScroll).toContain("t?.('chan.autoDetails')")
   })
 
-  it('keeps it out of the rail', () => {
-    // Three task lists ago this was a rail page. Two entries for one page is
-    // how a plugin ends up with a nav that nobody can reason about.
+  it('opens a dialog rather than switching pages', () => {
+    const section = read('ChannelPoolSection.tsx')
+    // The handler sets local state; a `setPage` call here would leave the pool.
+    expect(section).toContain('setAutoDetailsOpen(true)')
+    expect(section).toContain('<AutoCheckinDetailsDialog')
+    // Mounted at the end of the page, outside `main`, so the detail column's
+    // scroll container cannot clip it.
+    const tail = section.slice(section.lastIndexOf('</main>'))
+    expect(tail).toContain('<AutoCheckinDetailsDialog')
+  })
+
+  it('keeps no page-shaped leftover', () => {
+    // The rail page and its `checkin` branch are gone; a half-removed page
+    // would still compile and leave a dead branch behind.
     const shell = read('PoolCard.tsx')
-    expect(shell).not.toContain("id: 'checkin'")
+    expect(shell).not.toContain('AutoCheckinPage')
+    expect(shell).not.toContain("page === 'checkin'")
+    expect(() => read('AutoCheckinPage.tsx')).toThrow()
   })
 
-  it('renders the page when the pool asks for it', () => {
-    const shell = read('PoolCard.tsx')
-    expect(shell).toContain("page === 'checkin' ? <AutoCheckinPage")
-    // The pool header opens it by switching the page, not by opening a modal.
-    expect(shell).toContain("onOpenCheckin={() => { setPage('checkin') }}")
+  it('uses the shared 3.0 dialog vocabulary and injects no stylesheet', () => {
+    const dialog = read('AutoCheckinDetails.tsx')
+    // Same skeleton as the aggregate page's model picker.
+    expect(dialog).toContain('className="pick"')
+    expect(dialog).toContain('pick-head')
+    expect(dialog).toContain('pick-list')
+    // `bundle-contract.test.ts` fails a component that injects its own <style>;
+    // this catches the intent as well as the mechanism. Matched as an ELEMENT
+    // (`<style>{…}</style>`), not as the words: the header explains the history
+    // and mentions the tag by name.
+    expect(dialog).not.toMatch(/<style>\s*\{/u)
   })
 
-  it('keeps a rail icon available even though the rail no longer shows it', () => {
-    // RAIL_ICONS is keyed by page id; leaving the glyph in place means restoring
-    // the tab later is a one-line change, and a missing key would silently fall
-    // back to the bare initial.
-    expect(read('rail-icons.ts')).toContain('checkin:')
-    const locales = read('locales.ts')
-    expect(locales).toContain("'shell.tabCheckin': 'Claim ledger'")
-    expect(locales).toContain("'shell.tabCheckin': '领取账本'")
-  })
-
-  it('uses the shared page skeleton, not a dialog shell', () => {
-    const page = read('AutoCheckinPage.tsx')
-    expect(page).toContain('<main className="main">')
-    expect(page).toContain('<header className="mhead">')
-    expect(page).toContain('<div className="mbody">')
-    /*
-      A dialog would need its own scrim and would have to inject a stylesheet.
-      `bundle-contract.test.ts` already fails on a component that injects one;
-      this catches the other half — a full-viewport fixed overlay pretending to
-      be a page.
-    */
-    expect(page).not.toMatch(/position:\s*'fixed'/u)
-    expect(page).not.toContain('<style>')
-  })
-
-  it('deleted the dialog it replaced', () => {
-    // `git rm` is not something a later refactor notices; a stale import of a
-    // deleted module fails the build, but a leftover file would not.
-    expect(() => read('AutoCheckinDetails.tsx')).toThrow()
+  it('ships its few extra rules from the shared sheet', () => {
+    // Only what 3.0 genuinely lacks: the run picker, group tones, the dotted
+    // leader, and the failure line.
+    const styles = read('styles.ts')
+    expect(styles).toContain('.ledger-grouplabel')
+    expect(styles).toContain('.ledger-leader')
+    expect(styles).toContain('export const AUTO_LEDGER_CSS')
   })
 })

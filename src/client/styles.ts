@@ -1659,13 +1659,13 @@ export const BACKUP_CSS = `
 
 /* The update check, above the backup controls. Same card treatment as the panels below it, so
    the page reads as one list of maintenance actions rather than two unrelated blocks. */
-/* 领取账本（AutoCheckinPage）的样式。
-   这一页最初是覆盖在账号池上的弹窗，自带 <style> 注入；改成左侧导航的一页之后，
-   样式统一收到这里，和其余七个页面走同一个注入点。 */
+/* 领取详情弹窗（AutoCheckinDetails）的样式。
+   这个组件曾经自带一份 <style> 注入，等于维护第二套设计稿；现在拆出来收在这里，
+   和其余页面走同一个注入点，与 3.0 的类名体系保持一致。 */
 export const AUTO_LEDGER_CSS = `
-/* ---- 领取账本（AutoCheckinPage）----
+/* ---- 领取详情弹窗（AutoCheckinDetails）----
 
-   页面骨架（main.mhead + mhead-actions + mbody + .kpis + .sec）全部复用 3.0
+   弹窗骨架（遮罩 + .pick + .pick-head + .pick-tools + .pick-list）全部复用 3.0
    已有的类，这里补的只有 3.0 没有的四样：
    轮次选择器的排版、分组的色调、账号与金额之间的虚线引导、上游错误原文的次要行。
    一切颜色与间距都取设计稿令牌，不引入自己的变量。 */

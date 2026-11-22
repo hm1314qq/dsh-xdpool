@@ -33,9 +33,13 @@ import { channelIcon, channelInitials } from './channel-icons.ts'
 import { ModelFactsRow } from './model-facts-row.tsx'
 import { modelFactsFor, formatModelCapacity, type ModelFacts, baseName, multiplierOf, multiplierTone } from './model-facts.ts'
 import { recommendUse } from './recommend-use.ts'
+import { AutoCheckinDetailsDialog } from './AutoCheckinDetails.tsx'
 import { PASTE_ROUTES, WINDOW_LOGIN_ROUTES, canStartLoginInPlace, loginKindOf } from './login-routes.ts'
 import {
   accountsFrom,
+  autoCheckinFrom,
+  runAutoCheckin,
+  type ChannelAutoCheckin,
   balancesFrom,
   balancesTotal,
   balanceAmount,
@@ -1161,7 +1165,7 @@ async function fetchOwnSession(channel: string): Promise<
  * `active` 为空时（首次进入、或选中的渠道被移除）退回第一家，这样右栏
  * 永远不会是空的。
  */
-export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoClaimBusy, onAutoClaim, onOpenCheckin, banner }: {
+export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoClaimBusy, onAutoClaim, banner }: {
   readonly t?: Translate | undefined
   /** 中栏选中的渠道 id；空则显示第一家。 */
   readonly active?: string | undefined
@@ -1171,8 +1175,6 @@ export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoCla
   readonly autoClaim?: boolean | undefined
   readonly autoClaimBusy?: boolean | undefined
   readonly onAutoClaim?: ((on: boolean) => void) | undefined
-  /** 打开「领取详情」页。账本是独立一页，不是这里的浮层。 */
-  readonly onOpenCheckin?: (() => void) | undefined
   /** 外层的提示条，放进详情列 mbody 顶部（不能落在 .app 网格里）。 */
   readonly banner?: ReactNode | undefined
 }): ReactElement {
@@ -1301,6 +1303,17 @@ export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoCla
   const [usageBusy, setUsageBusy] = useState(false)
   /** `account.reload` 进行中。 */
   const [reloading, setReloading] = useState(false)
+  /**
+   * 积分自动化的账本：每账号明细 + 按轮历史。
+   *
+   * 开关本身走 `onAutoClaim`（宿主设置里的那一份），这里是只读的账本，用来回答
+   * 「哪一家、哪个账号、为什么没领到」—— 汇总行只会说「2 个失败」。
+   */
+  const [autoCheckin, setAutoCheckin] = useState<ChannelAutoCheckin | undefined>(undefined)
+  /** 领取详情弹窗开着没有。 */
+  const [autoDetailsOpen, setAutoDetailsOpen] = useState(false)
+  /** 手动强制一整轮领取进行中。 */
+  const [autoRunning, setAutoRunning] = useState(false)
   useEffect(() => {
     let live = true
     void (async () => {
@@ -1370,6 +1383,61 @@ export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoCla
     }
   }
 
+  /**
+   * 读一次账本。
+   *
+   * 打不开不是错误：老宿主（或 pack 没实现这一条）会让这个开关整体缺席，
+   * 而不是把整页弄成失败。
+   */
+  const loadAutoCheckin = async (): Promise<void> => {
+    try {
+      const envelope = await callPack('usage.autoCheckin', {})
+      if (!mountedRef.current) return
+      setAutoCheckin(autoCheckinFrom(envelope))
+    } catch {
+      // 便捷功能：pack 不答就算了，保持缺席。
+    }
+  }
+  useEffect(() => { void loadAutoCheckin() }, [])
+
+  /**
+   * 立刻跑一轮领取。
+   *
+   * 定时的一轮每天只跑一次，所以早上失败的账号在界面上根本没有重试入口。
+   * `{ run: true }` 只跳过那道闸门；重复领取是安全的，已领过的账号会回
+   * `already-claimed`。pack 等这一轮跑完才回，所以一次往返就能重画弹窗。
+   */
+  const runNowAutoCheckin = async (): Promise<void> => {
+    setAutoRunning(true)
+    try {
+      const next = await runAutoCheckin()
+      if (!mountedRef.current) return
+      /*
+        错误信封不是异常：`runAutoCheckin` 把 pack 的 `{ok:false}` 折成
+        undefined，直接吞掉会让弹窗重画旧数据、一个字都不说为什么。
+      */
+      if (next === undefined) {
+        setNotice('强制领取失败（pack 没有返回新的账本）')
+        return
+      }
+      setAutoCheckin(next)
+    } catch (cause) {
+      if (mountedRef.current) setNotice(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      if (mountedRef.current) setAutoRunning(false)
+    }
+  }
+
+  /**
+   * 打开领取详情。
+   *
+   * 每次打开都重读，而不是只在页面挂载时读一次：这一页可以开着好几个小时，
+   * 期间定时的那一轮已经落地；打开弹窗才是读者真的在意的时刻。
+   */
+  const openAutoDetails = async (): Promise<void> => {
+    setAutoDetailsOpen(true)
+    await loadAutoCheckin()
+  }
 
   const markBusy = (provider: string, on: boolean): void => {
     setBusy(previous => {
@@ -2515,20 +2583,22 @@ export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoCla
           领取账本的入口放在这一行的右端（三格统计旁边），因为它回答的正是这三格
           之后的第四个问题：「这些积分是怎么领来的」。
 
-          它是一页而不是浮层：账本要跨轮次、跨渠道对照，盖住账号池的弹窗做不到。
+          开的是弹窗而不是跳页：留在账号池里，看完一轮关掉就回到原处，
+          上下文不丢。
+
+          没有任何自动化能力时（`autoCheckin` 读不到）也照样画：读者至少能点开
+          看到「还没有记录」，比一个凭空消失的按钮更容易理解。
         */}
-        {onOpenCheckin === undefined ? null : (
-          <button
-            type="button"
-            className="btn"
-            /* 靠右对齐：这一行的三格统计也是右对齐的，按钮跟着走才不会显得漂浮 */
-            style={{ alignSelf: 'flex-end' }}
-            onClick={onOpenCheckin}
-            title={t?.('channelpool.checkinHint') ?? '逐账号的领取明细：谁领到了、谁失败了、为什么'}
-          >
-            {t?.('chan.autoDetails') ?? '领取详情'}
-          </button>
-        )}
+        <button
+          type="button"
+          className="btn"
+          /* 靠右对齐：这一行的三格统计也是右对齐的，按钮跟着走才不会显得漂浮 */
+          style={{ alignSelf: 'flex-end' }}
+          onClick={() => { void openAutoDetails() }}
+          title={t?.('channelpool.checkinHint') ?? '逐账号的领取明细：谁领到了、谁失败了、为什么'}
+        >
+          {t?.('chan.autoDetails') ?? '领取详情'}
+        </button>
       </div>
       <div className="list-scroll">
         {bound.length === 0 ? null : (
@@ -3289,6 +3359,24 @@ export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoCla
         </section>
       </div>
     </main>
+    {/*
+      领取详情弹窗。挂在页面末尾而不是详情列里：它是覆盖层，
+      放进 main 会被详情列的滚动容器裁掉。
+    */}
+    {autoDetailsOpen && (
+      <AutoCheckinDetailsDialog
+        rows={autoCheckin?.details ?? []}
+        history={autoCheckin?.history ?? []}
+        lastAt={autoCheckin?.lastAt}
+        running={autoRunning || autoCheckin?.running === true}
+        // 账本写的是「Qoder 中国版 · 就这我是真的不会」，不是「qodercn · …」：
+        // provider id 是机器键，显示名才是这一页其他地方在用的东西。
+        names={Object.fromEntries(entries.map(entry => [entry.channel.id, entry.channel.name]))}
+        t={t}
+        onClose={() => { setAutoDetailsOpen(false) }}
+        onRunNow={() => { void runNowAutoCheckin() }}
+      />
+    )}
     </>
   )
 }

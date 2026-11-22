@@ -48,7 +48,6 @@ import { DEFAULT_AUTOMATION_HOURS } from '../status-paths.ts'
 import { POOL_CARD_AVATAR } from './avatar.ts'
 import { PoolShell, PageHero, RailIcon, initialShellTab, rememberedShellTab } from './shell.tsx'
 import { LedgerPage } from './LedgerPage.tsx'
-import { AutoCheckinPage } from './AutoCheckinPage.tsx'
 import { AggregatePage } from './AggregatePage.tsx'
 import { ChannelsPage } from './ChannelsPage.tsx'
 import { RoutingPage } from './RoutingPage.tsx'
@@ -532,17 +531,6 @@ export function PoolCard({ t, settingsScope }: PoolCardProps) {
    * earned — on the login page, and in the counts the pack reports there.
    */
   const [channels, setChannels] = useState<PoolWebChannel[]>([])
-  /**
-   * Provider id → display name, for pages that name a channel in a row.
-   *
-   * The claim ledger stores `qodercn` and `magicrew-intl`; the rest of the UI
-   * says 「Qoder 国内版」and「MagiCrew 国际」. Mapping once here keeps every such
-   * row from reaching for the roster itself.
-   */
-  const channelNames = useMemo<Record<string, string>>(
-    () => Object.fromEntries(channels.map(channel => [channel.id, channel.name])),
-    [channels],
-  )
   /**
    * Which page is showing.
    *
@@ -1552,7 +1540,6 @@ export function PoolCard({ t, settingsScope }: PoolCardProps) {
       {page === 'aggregate' ? <AggregatePage t={t} />
         : page === 'channels' ? <ChannelsPage t={t} />
           : page === 'ledger' ? <LedgerPage t={t} usage={usage} />
-                  : page === 'checkin' ? <AutoCheckinPage t={t} names={channelNames} />
                   : page === 'routing' ? <RoutingPage t={t} />
                 : page === 'gateway' ? <GatewayPage t={t} />
                   : page === 'backup' ? <BackupPanel t={t} />
@@ -1585,7 +1572,6 @@ export function PoolCard({ t, settingsScope }: PoolCardProps) {
                 autoClaim={statusOf('cn')?.automation?.enabled === true}
                 autoClaimBusy={automationBusyRegion !== undefined}
                 onAutoClaim={on => { void setAutomationEnabled('cn', on) }}
-                onOpenCheckin={() => { setPage('checkin') }}
                 /*
                   提示条放进详情列的 mbody 里。之前它们是 .app 网格的直接子元素，
                   一出现就占一个格子，把三列挤乱。
