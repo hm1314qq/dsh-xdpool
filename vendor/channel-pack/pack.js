@@ -31049,7 +31049,9 @@ var AccountPool = class {
    * 「池认为最优的一个」，无法枚举候选自己去重。
    */
   async getAvailableAccount(provider, modelId, excludeAccountIds) {
-    const candidates = this.readAccounts().filter((a) => a.provider === provider && a.enabled).filter((a) => excludeAccountIds === void 0 || !excludeAccountIds.has(a.id)).filter((a) => {
+    // [xdpool-local] qoder-risk-guard: risk-cooled accounts are invisible to every picker, including the
+    // first pick (`resolveCredential` walks the same pool) — not only to rotations.
+    const candidates = this.readAccounts().filter((a) => a.provider === provider && a.enabled).filter((a) => !(Number.isFinite(a.riskCooldownUntil) && a.riskCooldownUntil > Date.now())).filter((a) => excludeAccountIds === void 0 || !excludeAccountIds.has(a.id)).filter((a) => {
       if (modelId.length === 0) return true;
       if (!a.modelRateLimits) return true;
       const resetAt = a.modelRateLimits[modelId];
@@ -31111,6 +31113,24 @@ var AccountPool = class {
    * ⇒ 这里取「更长者」。真值被丢掉的风险不用担心：所有调用方写入的都是**未来**
    * 时刻，而过期的标记由 {@link sweepExpiredRateLimits} 清理。
    */
+  // [xdpool-local] qoder-risk-guard: an ACCOUNT-level risk cooldown (see the adapter for why a risk
+  // gate is not a per-model rate limit: the gateway refuses the account, not the
+  // model). `getAvailableAccount` filters on it; longer-wins like
+  // updateModelRateLimit; expired markers are inert, so no sweep is needed.
+  async setAccountRiskCooldown(accountId, untilMs, reason) {
+    const accounts = this.readAccounts();
+    const idx = accounts.findIndex((a) => a.id === accountId);
+    if (idx === -1) return;
+    if (!Number.isFinite(untilMs)) return;
+    const next = [...accounts];
+    const entry = { ...next[idx] };
+    entry.riskCooldownUntil = untilMs;
+    entry.riskCooldownReason = typeof reason === "string" ? reason.slice(0, 200) : "";
+    next[idx] = entry;
+    await this.writeAccounts(next);
+    this.ctx.logger?.info?.(`[channel-pack] ${RISK_COOLDOWN_LOG}: ${accountId} ${RISK_RECOVERS_AT_LOG} ${new Date(untilMs).toISOString()}`);
+  }
+
   async updateModelRateLimit(accountId, modelId, resetAtMs) {
     const accounts = this.readAccounts();
     const idx = accounts.findIndex((a) => a.id === accountId);
@@ -37785,6 +37805,68 @@ import { LlmAdapter as LlmAdapter4, LlmError as LlmError7, ReasoningEffortId as 
 
 // vendor/channel-pack/src/qoder.ts
 import { createHash as createHash2, randomUUID, randomBytes } from "node:crypto";
+// [xdpool-local] qoder-risk-guard: account-level risk handling knobs (all env-overridable).
+//
+//   DSH_QODER_RISK_COOLDOWN_MS  how long a risk-flagged account sits out (30 min)
+//   DSH_QODER_QUEUE_PARK_MS     a queue wait longer than this reads as parking (2 min)
+//   DSH_QODER_ACCOUNT_GAP_MS    min gap between request STARTS on one account (2s, 0 = off)
+function riskHasAccountCheck(accountId) {
+  return accountId !== void 0 && accountId.length > 0;
+}
+function qoderEnvMs(name, fallback) {
+  const raw = process.env[name];
+  if (raw === void 0 || raw.length === 0) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+var QODER_RISK_COOLDOWN_MS = qoderEnvMs("DSH_QODER_RISK_COOLDOWN_MS", 18e5);
+var QODER_QUEUE_PARK_MS = qoderEnvMs("DSH_QODER_QUEUE_PARK_MS", 12e4);
+var QODER_ACCOUNT_MIN_GAP_MS = qoderEnvMs("DSH_QODER_ACCOUNT_GAP_MS", 2e3);
+var QODER_ACCOUNT_JITTER_MS = 500;
+var RISK_COOLDOWN_LOG = '\u98CE\u63A7\u51B7\u5374';
+var RISK_RECOVERS_AT_LOG = '\u6062\u590D\u4E8E';
+var QODER_RISK_MSG_HEAD = '\u98CE\u63A7\u51B7\u5374\u4E2D';
+var QODER_RISK_MSG_RECOVER = '\u7EA6\u9700';
+var QODER_RISK_MSG_MIN = '\u5206\u949F\u540E\u81EA\u52A8\u6062\u590D';
+var QODER_RISK_MSG_EXHAUSTED = '\uFF08\u6C60\u5185\u6CA1\u6709\u5176\u5B83\u53EF\u7528\u8D26\u53F7\uFF09';
+/** A queue wait this long is the risk gate parking the account, not a busy model. */
+function qoderQueueParkMs(info) {
+  if (info === void 0) return void 0;
+  const seconds = readFiniteNumber(info.retryAfterSeconds);
+  const ms = readFiniteNumber(info.retry_after_ms) ?? (seconds === void 0 ? void 0 : seconds * 1000);
+  if (ms === void 0 || ms < QODER_QUEUE_PARK_MS) return void 0;
+  return ms;
+}
+/** One human sentence for a risk-cooled account, with the remaining minutes. */
+function qoderRiskMessage(accountId, waitMin, reason, exhausted) {
+  const who = accountId !== void 0 && accountId.length > 0 ? " " + accountId : "";
+  const why = reason === "" ? "" : " \u2014 " + reason;
+  const tail = exhausted === true ? " " + QODER_RISK_MSG_EXHAUSTED : "";
+  return "qoder: " + QODER_RISK_MSG_HEAD + who + " " + QODER_RISK_MSG_RECOVER + " " + String(waitMin) + " " + QODER_RISK_MSG_MIN + why + tail;
+}
+// Spaces REQUEST STARTS per account (min gap + jitter) without serializing streams:
+// a long turn never blocks the next turn — only their starts are spaced. Chained
+// per account so concurrent turns cannot race the gap. The first request on an
+// account starts immediately; every later one waits its turn.
+var qoderAccountGate = /* @__PURE__ */ new Map();
+function qoderAccountGateWait(accountId, signal) {
+  if (accountId === void 0 || accountId.length === 0) return Promise.resolve();
+  const previous = qoderAccountGate.get(accountId);
+  if (previous === void 0) {
+    qoderAccountGate.set(accountId, Promise.resolve(Date.now()));
+    return Promise.resolve();
+  }
+  const next = previous.catch(() => 0).then((lastStart) => {
+    const gap = QODER_ACCOUNT_MIN_GAP_MS + Math.floor(Math.random() * QODER_ACCOUNT_JITTER_MS);
+    return lastStart + gap;
+  }).then((earliest) => new Promise((resolve) => {
+    const timer = setTimeout(resolve, Math.max(0, earliest - Date.now()));
+    signal?.addEventListener("abort", () => { clearTimeout(timer); resolve(earliest); }, { once: true });
+  }));
+  qoderAccountGate.set(accountId, next);
+  return next;
+}
+
 var QODER_REQUEST_TIMEOUT_MS = 3e4;
 var QODER_LOGIN_TIMEOUT_MS = 3e5;
 var QODER_POLL_INTERVAL_MS = 1e3;
@@ -39627,14 +39709,31 @@ var QoderAdapter = class extends LlmAdapter4 {
       triedAccounts.add(activeAccountId);
     }
     for (; ; ) {
+      // [xdpool-local] qoder-risk-guard: pace request starts per account. Rotations re-enter this loop,
+      // so rotated accounts are paced too; the first request starts immediately.
+      await qoderAccountGateWait(activeAccountId, options.signal);
       response = await this.sendEncrypted(await buildRequest(credential), options);
       if (!response.ok && (response.status === 401 || response.status === 403)) {
         const errorText = await response.text().catch(() => "");
-        const queueInfo = parseQoderQueueError(errorText);
-        if (queueInfo !== void 0) {
-          await this.waitForQueue(queueInfo, ++queueAttempts, queueDeadline, options);
-          continue;
-        }
+          const queueInfo = parseQoderQueueError(errorText);
+          if (queueInfo !== void 0) {
+            // [xdpool-local] qoder-risk-guard: a queue slot this long is the risk gate parking the
+            // account — cool it and rotate instead of holding the turn (and the
+            // queue deadline) for the whole park. Short waits keep waiting.
+            const parkedMs = qoderQueueParkMs(queueInfo);
+            if (parkedMs !== void 0 && riskHasAccountCheck(activeAccountId)) {
+              await this.options.accountPool?.setAccountRiskCooldown(activeAccountId, Date.now() + QODER_RISK_COOLDOWN_MS, `\u6392\u961F ${String(Math.round(parkedMs / 1000))}s`);
+              const rotatedPark = await this.rotateOnRisk(options, triedAccounts);
+              if (rotatedPark !== void 0) {
+                credential = rotatedPark.credential;
+                activeAccountId = rotatedPark.accountId;
+                authRefreshed = false;
+                continue;
+              }
+            }
+            await this.waitForQueue(queueInfo, ++queueAttempts, queueDeadline, options);
+            continue;
+          }
         if (isBillingBusinessCode(response.status) || looksLikeBillingError(errorText)) {
           const switched = await this.switchAccountOnQuota(options, triedAccounts, activeAccountId);
           if (switched !== void 0) {
@@ -39655,7 +39754,27 @@ var QoderAdapter = class extends LlmAdapter4 {
           credential = await this.ensureUid(refreshed);
           continue;
         }
-        throw new LlmError7(`qoder: ${errorDetail4(errorText)}`, httpErrorCode4(response.status), { status: response.status });
+        // [xdpool-local] qoder-risk-guard: a 401/403 that SURVIVES a token refresh is the risk gate
+        // refusing this account — the token was minted seconds ago, so the
+        // credential is fine and refreshing again is pointless. Cool the ACCOUNT
+        // (the gate does not care which model was asked) and rotate to the next
+        // account; when the pool is empty, report the remaining minutes instead
+        // of a bare AUTH error the next turn would hit again on the same account.
+        const riskUntil = Date.now() + QODER_RISK_COOLDOWN_MS;
+        const riskReason = errorDetail4(errorText);
+        const riskHasAccount = activeAccountId !== void 0 && activeAccountId.length > 0;
+        if (this.options.accountPool !== void 0 && riskHasAccount) {
+          await this.options.accountPool.setAccountRiskCooldown(activeAccountId, riskUntil, riskReason);
+        }
+        const rotated = riskHasAccount ? await this.rotateOnRisk(options, triedAccounts) : void 0;
+        if (rotated !== void 0) {
+          credential = rotated.credential;
+          activeAccountId = rotated.accountId;
+          authRefreshed = false;
+          continue;
+        }
+        const riskWaitMin = Math.max(1, Math.ceil((riskUntil - Date.now()) / 60000));
+        throw new LlmError7(qoderRiskMessage(activeAccountId, riskWaitMin, riskReason, riskHasAccount), httpErrorCode4(response.status), { status: response.status });
       }
       if (!response.ok && response.status === 409 && !duplicateRetried) {
         duplicateRetried = true;
@@ -39683,6 +39802,19 @@ var QoderAdapter = class extends LlmAdapter4 {
           step = await iterator.next();
         } catch (error) {
           if (error instanceof ModelQueuedError) {
+            // [xdpool-local] qoder-risk-guard: same parking rule as the HTTP layer above.
+            const parkedMsSse = qoderQueueParkMs(queueInfoOf(error));
+            if (parkedMsSse !== void 0 && riskHasAccountCheck(activeAccountId)) {
+              await this.options.accountPool?.setAccountRiskCooldown(activeAccountId, Date.now() + QODER_RISK_COOLDOWN_MS, `\u6392\u961F ${String(Math.round(parkedMsSse / 1000))}s`);
+              const rotatedSse = await this.rotateOnRisk(options, triedAccounts);
+              if (rotatedSse !== void 0) {
+                credential = rotatedSse.credential;
+                activeAccountId = rotatedSse.accountId;
+                authRefreshed = false;
+                queued = true;
+                break;
+              }
+            }
             await this.waitForQueue(
               queueInfoOf(error),
               ++queueAttempts,
@@ -39743,6 +39875,17 @@ var QoderAdapter = class extends LlmAdapter4 {
     tried.add(next.entry.id);
     const credential = next.credential;
     return { credential: await this.ensureUid(credential), accountId: next.entry.id };
+  }
+  /** [xdpool-local] qoder-risk-guard: rotate like switchAccountOnQuota, but WITHOUT writing a model
+    * rate limit — a risk gate cools the account (setAccountRiskCooldown above),
+    * not one model until midnight. */
+  async rotateOnRisk(options, tried) {
+    const pool = this.options.accountPool;
+    if (pool === void 0) return void 0;
+    const next = await pool.getAvailableAccount(this.product.id, options.model, tried);
+    if (next === null || tried.has(next.entry.id)) return void 0;
+    tried.add(next.entry.id);
+    return { credential: await this.ensureUid(next.credential), accountId: next.entry.id };
   }
   /**
    * 排队等待（HTTP 层与 SSE 层**共用**）。
