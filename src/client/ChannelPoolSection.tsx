@@ -1254,7 +1254,7 @@ async function fetchOwnSession(channel: string): Promise<
  * `active` 为空时（首次进入、或选中的渠道被移除）退回第一家，这样右栏
  * 永远不会是空的。
  */
-export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoClaimBusy, onAutoClaim, autoClaimRunning, onAutoClaimRun, banner }: {
+export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoClaimBusy, onAutoClaim, autoClaimRunning, onAutoClaimRun, banner, poolAccounts }: {
   readonly t?: Translate | undefined
   /** 中栏选中的渠道 id；空则显示第一家。 */
   readonly active?: string | undefined
@@ -1270,6 +1270,12 @@ export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoCla
   readonly onAutoClaim?: ((on: boolean) => void) | undefined
   /** 外层的提示条，放进详情列 mbody 顶部（不能落在 .app 网格里）。 */
   readonly banner?: ReactNode | undefined
+  /**
+   * 插件池账号卡（PoolCard 的两个 region section）。和 banner 同一条规矩：渲染进 .mbody，
+   * 不能作为 .app 网格的直接子元素 —— 那里每个元素都各占一格，3.0.4 起它们就是这么把
+   * 中栏挤到 rail 底下的。
+   */
+  readonly poolAccounts?: ReactNode | undefined
 }): ReactElement {
   /*
     选中哪一家。外部传了就用外部的（中栏在别的组件里时），
@@ -2733,6 +2739,7 @@ export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoCla
         {list}
         <main className="main dsm-xdpool-cpool dsm-xdpool-regions" aria-label={t?.('channelpool.title') ?? 'Channels'}>
           <div className="mbody" style={{ paddingTop: 'var(--s5)' }}>
+            {poolAccounts}
             {banner}
             {error === undefined ? null : (
               <p className="hint">
@@ -2894,6 +2901,7 @@ export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoCla
       </header>
 
       <div className="mbody">
+        {poolAccounts}
         {banner}
         {/*
           就地登录的状态条。
