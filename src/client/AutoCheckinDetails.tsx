@@ -173,9 +173,16 @@ export function AutoCheckinDetailsDialog({
   }, [shownRows])
 
   const title = t?.('auto.details.title') ?? '领取详情'
-  const whenText = lastAt === undefined
+  /*
+    工具条上的时间描述「正在看的这一轮」，不是全局的 lastAt —— 翻到历史轮次时
+    两者会对不上（00:43 的 lastAt 配着 22:42 的轮次，读起来像两张单据）。
+  */
+  const shownAt = selected === 'live'
+    ? lastAt
+    : (history[Number(selected)]?.at ?? lastAt)
+  const whenText = shownAt === undefined
     ? (t?.('auto.details.noRun') ?? '还没有完成过领取。')
-    : new Date(lastAt).toLocaleString()
+    : new Date(shownAt).toLocaleString()
   const totalCredit = headerRun?.totals?.credit ?? 0
   const totalAccounts = shownRows.length
 
@@ -203,7 +210,12 @@ export function AutoCheckinDetailsDialog({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        style={{ maxHeight: 'calc(100vh - 48px)', height: 'auto', width: 'min(560px, 100%)' }}
+        /*
+          高度必须交给 .pick 那份样式表（height: 560px），这里只限制上限。之前在这里写
+          height: 'auto'，把骨架的确定高度覆盖掉 —— flex:1 1 0 的列表在高度不确定的
+          容器里被压成 0，明细全部被 overflow:hidden 裁掉，弹窗看起来是空的。
+        */
+        style={{ maxHeight: 'calc(100vh - 48px)', width: 'min(640px, 100%)' }}
         onClick={event => { event.stopPropagation() }}
       >
         {/* ── Head: what ran, when, and the number that matters ── */}
@@ -264,6 +276,15 @@ export function AutoCheckinDetailsDialog({
 
         {/* ── The receipt body ── */}
         <div className="pick-list">
+          {/*
+            调度器那句汇总（「8 个渠道：4 个账号领取成功（+700 积分）…」）放在收据
+            正文最上面：总额在标题里，这句解释总额是怎么来的。
+          */}
+          {headerRun !== undefined && headerRun.result !== '' && (
+            <p className="hint" style={{ margin: '0 0 var(--s2)' }}>
+              {headerRun.result}
+            </p>
+          )}
           {totalAccounts === 0 && (
             <p className="hint" style={{ margin: 'var(--s2)' }}>
               {history.length === 0

@@ -76,10 +76,13 @@ describe('the claim ledger is a dialog opened from the pool header', () => {
 
   it('ships its few extra rules from the shared sheet', () => {
     // Only what 3.0 genuinely lacks: the run picker, group tones, the dotted
-    // leader, and the failure line.
-    const styles = read('styles.ts')
+    // leader, and the failure line. The sheet lives in its own module so the
+    // import does not drag the 2.x legacy rules from `styles.ts` into the bundle.
+    const styles = read('ledger-styles.ts')
     expect(styles).toContain('.ledger-grouplabel')
     expect(styles).toContain('.ledger-leader')
     expect(styles).toContain('export const AUTO_LEDGER_CSS')
+    // …and the sheet is actually injected: design-style.ts must reference it.
+    expect(read('design-style.ts')).toContain('AUTO_LEDGER_CSS')
   })
 })
