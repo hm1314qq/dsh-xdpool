@@ -429,6 +429,7 @@ export function PoolShell({
     if (next !== undefined) select(next.id)
   }, [active, select, tabs])
 
+
   return (
     <div ref={appRef} className={wide ? 'app app-wide' : 'app'} data-w={tier} data-theme={theme}
       style={{ position: 'relative' }}>

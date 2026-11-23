@@ -46,6 +46,7 @@ import {
 } from '../status-paths.ts'
 import { DEFAULT_AUTOMATION_HOURS } from '../status-paths.ts'
 import { POOL_CARD_AVATAR } from './avatar.ts'
+import { AccountCard } from './account-card.tsx'
 import { PoolShell, PageHero, RailIcon, initialShellTab, rememberedShellTab } from './shell.tsx'
 import { LedgerPage } from './LedgerPage.tsx'
 import { AggregatePage } from './AggregatePage.tsx'
@@ -1556,6 +1557,55 @@ export function PoolCard({ t, settingsScope }: PoolCardProps) {
               {/* dsm-xdpool-regions 是几处测试的锚点，挂在这里标记「这一页是账号池」 */}
               <div className="dsm-xdpool-regions dsm-xdpool-region-grid" style={{ display: 'contents' }}>
               {/*
+                插件池账号卡 —— 202/203 的那个洞。
+
+                3.0 重做时这块渲染被整段砍掉，`AccountBlock` 组件却原样留着
+                （文件底部），于是两件事同时发生：桌面客户端读到的账号在界面上
+                消失了（用户以为「更新后账号丢了」），每日签到按钮也跟着没了
+                （它就在这张卡里）。组件本来还带着 `serving` —— 那正是「正在
+                使用这个账号」的徽章，挂回来就一起有了。
+
+                两个 region 各自渲染：数据来自 statusOf(region)、操作走这个组件
+                里已经写好的 handler，所以这里只补一层列表，不加新逻辑。
+              */}
+              {(['cn', 'global'] as const).map(region => {
+                const here = statusOf(region)
+                const rows = here?.accounts ?? []
+                if (rows.length === 0) return null
+                return (
+                  <section key={region} className="sec">
+                    <div className="sec-head">
+                      <span className="sec-title">
+                        {region === 'cn'
+                          ? (t?.('row.tabCn') ?? 'CN')
+                          : (t?.('row.tabGlobal') ?? 'Global')}
+                        {` · ${String(rows.length)}`}
+                      </span>
+                    </div>
+                    {/*
+                      自包含的小卡片（account-card.tsx），不是 2.x 的 AccountBlock：
+                      后者用渠道行的类名，挂进 3.0 的页面会把布局挤坏。
+                    */}
+                    <div className="xdp-accts">
+                      {rows.map(account => (
+                        <AccountCard
+                          key={account.id}
+                          account={account}
+                          t={t as never}
+                          serving={here?.activeAccountId === account.id}
+                          {...checkinBusyId === account.id ? { claiming: true } : {}}
+                          {...accountBusyId === account.id ? { busy: true } : {}}
+                          onClaim={() => { void claimCheckin(region, account.id) }}
+                          onToggle={disabled => { void toggleAccountDisabled(region, account.id, disabled) }}
+                          onPrefer={id => { void setPreferredAccount(region, id) }}
+                          onIgnore={() => { void setAccountIgnored(region, account.id, true) }}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                )
+              })}
+              {/*
                 两张 region-card（WorkBuddy 国内/国际）不再渲染。
 
                 设计稿的右栏是「中栏选中那一个渠道的详情」，不是两张并列的汇总卡。
@@ -1572,6 +1622,8 @@ export function PoolCard({ t, settingsScope }: PoolCardProps) {
                 autoClaim={statusOf('cn')?.automation?.enabled === true}
                 autoClaimBusy={automationBusyRegion !== undefined}
                 onAutoClaim={on => { void setAutomationEnabled('cn', on) }}
+                autoClaimRunning={automationRun !== undefined}
+                onAutoClaimRun={() => { void runAutomationJob('cn') }}
                 /*
                   提示条放进详情列的 mbody 里。之前它们是 .app 网格的直接子元素，
                   一出现就占一个格子，把三列挤乱。

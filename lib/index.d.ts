@@ -3661,6 +3661,16 @@ interface WorkBuddyAdapterOptions {
    * without a restart.
    */
   extraRows?: (() => readonly FreeModelRow[]) | undefined;
+  /**
+   * Whether this region's pool holds at least one account — issue #204.
+   *
+   * Without it the provider published the built-in roster even on a machine with
+   * nobody signed in: the picker showed a full WorkBuddy group whose every call
+   * could only fail. Both other adapters answer "no catalogue" when they have no
+   * credential (`providerCatalogVisible` in the pack, and the Doubao adapter
+   * since #169), and this one is no different.
+   */
+  hasAccounts?: (() => boolean) | undefined;
 }
 /** What {@link createWorkBuddyAdapter} hands back. */
 interface WorkBuddyAdapter {
@@ -4850,6 +4860,15 @@ export interface Config {
    * for `enabledModelIds`, and it is avoided by keeping the polarity.
    */
   doubaoDisabledModels?: string[];
+  /**
+   * The card's 「全关」 — issue: 「豆包模型全关了但选择器还在」.
+   *
+   * The disable-list alone cannot carry this: an all-off that stored `[]` (the
+   * card's roster had not loaded yet) reads back as "nothing disabled", and an
+   * all-off that stored every id stops working the moment a NEW model appears
+   * upstream. One explicit flag says exactly what the user pressed.
+   */
+  doubaoHideAllModels?: boolean;
 }
 /** One region's saved model selection. */
 export interface ModelSelectionConfig {
