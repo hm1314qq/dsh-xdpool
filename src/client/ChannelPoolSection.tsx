@@ -1254,7 +1254,7 @@ async function fetchOwnSession(channel: string): Promise<
  * `active` 为空时（首次进入、或选中的渠道被移除）退回第一家，这样右栏
  * 永远不会是空的。
  */
-export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoClaimBusy, onAutoClaim, autoClaimRunning, onAutoClaimRun, banner, poolAccounts }: {
+export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoClaimBusy, onAutoClaim, autoClaimRunning, onAutoClaimRun, banner, regionCards }: {
   readonly t?: Translate | undefined
   /** 中栏选中的渠道 id；空则显示第一家。 */
   readonly active?: string | undefined
@@ -1271,11 +1271,13 @@ export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoCla
   /** 外层的提示条，放进详情列 mbody 顶部（不能落在 .app 网格里）。 */
   readonly banner?: ReactNode | undefined
   /**
-   * 插件池账号卡（PoolCard 的两个 region section）。和 banner 同一条规矩：渲染进 .mbody，
-   * 不能作为 .app 网格的直接子元素 —— 那里每个元素都各占一格，3.0.4 起它们就是这么把
-   * 中栏挤到 rail 底下的。
+   * 外层的插件池账号卡，和 banner 一样进详情列 mbody。
+   *
+   * 这一页是 .app 的三列网格（rail | 渠道列表 | 详情），detail 列之外没有第四格。
+   * 多出来的内容挂在 .app 层都会自己占一格，把 list 和 main 顶到第二行，
+   * 而 .app 是 height:100vh + overflow:hidden —— 第二行直接被裁掉。
    */
-  readonly poolAccounts?: ReactNode | undefined
+  readonly regionCards?: ReactNode | undefined
 }): ReactElement {
   /*
     选中哪一家。外部传了就用外部的（中栏在别的组件里时），
@@ -1400,8 +1402,6 @@ export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoCla
   const [marvisQuotas, setMarvisQuotas] = useState<readonly MarvisQuota[] | undefined>(
     () => marvisQuotaSnapshot ?? storedPoolOnce()?.marvis)
   const [usageBusy, setUsageBusy] = useState(false)
-  /** `account.reload` 进行中。 */
-  const [reloading, setReloading] = useState(false)
   /**
    * 积分自动化的账本：每账号明细 + 按轮历史。
    *
@@ -1413,6 +1413,8 @@ export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoCla
   const [autoDetailsOpen, setAutoDetailsOpen] = useState(false)
   /** 手动强制一整轮领取进行中。 */
   const [autoRunning, setAutoRunning] = useState(false)
+  /** `account.reload` 进行中。 */
+  const [reloading, setReloading] = useState(false)
   useEffect(() => {
     let live = true
     void (async () => {
@@ -1450,42 +1452,10 @@ export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoCla
     }
   }
 
-
-  /**
-   * 让手工改动 `channel-pack/state.json` 立即生效，不必重启 DSH。
-   *
-   * pack 把账号表在内存里留了整个进程（`ensureLoaded` 只跑一次），所以在
-   * `account.reload` 之前，唯一能看见外部改动的办法是重启宿主 —— 而且之后再
-   * 保存一次还会把那个改动写回去。现在 pack 写之前也会重读，磁盘赢。
-   */
-  const reloadFromDisk = async (): Promise<void> => {
-    setReloading(true)
-    try {
-      const envelope = await callPack('account.reload', {})
-      if (!mountedRef.current) return
-      if (!envelope.ok) {
-        setNotice(envelope.error?.message ?? '重新读取被拒绝')
-        return
-      }
-      invalidatePoolSnapshot()
-      setEnabled(new Map())
-      await load()
-      if (!mountedRef.current) return
-      const applied = (envelope.value as { applied?: unknown } | undefined)?.applied
-      setNotice(
-        applied === false
-          ? '磁盘状态不可读，已保留当前内存副本'
-          : '已从磁盘重新读取账号状态',
-      )
-    } finally {
-      if (mountedRef.current) setReloading(false)
-    }
-  }
-
   /**
    * 读一次账本。
    *
-   * 打不开不是错误：老宿主（或 pack 没实现这一条）会让这个开关整体缺席，
+   * 打不开不是错误：老宿主（或 pack 没实现这一条）会让账本整体缺席，
    * 而不是把整页弄成失败。
    */
   const loadAutoCheckin = async (): Promise<void> => {
@@ -1536,6 +1506,37 @@ export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoCla
   const openAutoDetails = async (): Promise<void> => {
     setAutoDetailsOpen(true)
     await loadAutoCheckin()
+  }
+
+  /**
+   * 让手工改动 `channel-pack/state.json` 立即生效，不必重启 DSH。
+   *
+   * pack 把账号表在内存里留了整个进程（`ensureLoaded` 只跑一次），所以在
+   * `account.reload` 之前，唯一能看见外部改动的办法是重启宿主 —— 而且之后再
+   * 保存一次还会把那个改动写回去。现在 pack 写之前也会重读，磁盘赢。
+   */
+  const reloadFromDisk = async (): Promise<void> => {
+    setReloading(true)
+    try {
+      const envelope = await callPack('account.reload', {})
+      if (!mountedRef.current) return
+      if (!envelope.ok) {
+        setNotice(envelope.error?.message ?? '重新读取被拒绝')
+        return
+      }
+      invalidatePoolSnapshot()
+      setEnabled(new Map())
+      await load()
+      if (!mountedRef.current) return
+      const applied = (envelope.value as { applied?: unknown } | undefined)?.applied
+      setNotice(
+        applied === false
+          ? '磁盘状态不可读，已保留当前内存副本'
+          : '已从磁盘重新读取账号状态',
+      )
+    } finally {
+      if (mountedRef.current) setReloading(false)
+    }
   }
 
   const markBusy = (provider: string, on: boolean): void => {
@@ -2602,14 +2603,26 @@ export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoCla
   // So: while the first read is in flight, say so; when it failed, say why;
   // only a successful read that found nothing stays silent.
   if (entries.length === 0 && error === undefined) {
-    if (!loading) return <></>
-    return (
-      <section className="dsm-xdpool-cpool" aria-label={t?.('channelpool.title') ?? 'Channels'}>
-        <p className="note" role="status">
-          {t?.('channelpool.loading') ?? 'Reading scan channels…'}
-        </p>
-      </section>
-    )
+    /*
+      一条渠道都没读到，但插件池账号卡（regionCards）不属于任何渠道：
+      账号可能已经存好了、只是渠道还没扫出来，这种情况不能返回空。
+
+      所以这里留一个出口，让「有卡且已读完」的情况落到下面
+      chosenEntry === undefined 那条分支 —— 它本来就渲染 {list} + main > mbody，
+      列表头显示 0 / 0 / —，读起来是「确实没有渠道」而不是一片空白，
+      而不是另写一套 list + main。那条分支在 error 存在时本来就一直在走，是既有代码。
+    */
+    const keepForRegionCards = regionCards !== undefined && !loading
+    if (!keepForRegionCards) {
+      if (!loading) return <></>
+      return (
+        <section className="dsm-xdpool-cpool" aria-label={t?.('channelpool.title') ?? 'Channels'}>
+          <p className="note" role="status">
+            {t?.('channelpool.loading') ?? 'Reading scan channels…'}
+          </p>
+        </section>
+      )
+    }
   }
   /*
     ---------------------------------------------------------------
@@ -2699,11 +2712,7 @@ export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoCla
           领取账本的入口放在这一行的右端（三格统计旁边），因为它回答的正是这三格
           之后的第四个问题：「这些积分是怎么领来的」。
 
-          开的是弹窗而不是跳页：留在账号池里，看完一轮关掉就回到原处，
-          上下文不丢。
-
-          没有任何自动化能力时（`autoCheckin` 读不到）也照样画：读者至少能点开
-          看到「还没有记录」，比一个凭空消失的按钮更容易理解。
+          开的是弹窗而不是跳页：留在账号池里，看完一轮关掉就回到原处，上下文不丢。
         */}
         <button
           type="button"
@@ -2739,8 +2748,8 @@ export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoCla
         {list}
         <main className="main dsm-xdpool-cpool dsm-xdpool-regions" aria-label={t?.('channelpool.title') ?? 'Channels'}>
           <div className="mbody" style={{ paddingTop: 'var(--s5)' }}>
-            {poolAccounts}
             {banner}
+            {regionCards}
             {error === undefined ? null : (
               <p className="hint">
                 {t?.('channelpool.loadError', { message: error }) ?? `Could not load channels: ${error}`}
@@ -2901,8 +2910,8 @@ export function ChannelPoolSection({ t, active, onAddAccount, autoClaim, autoCla
       </header>
 
       <div className="mbody">
-        {poolAccounts}
         {banner}
+        {regionCards}
         {/*
           就地登录的状态条。
           因为不再跳页，读者需要在这一页看到「窗口已经开了 / 还在等 / 失败了为什么」。

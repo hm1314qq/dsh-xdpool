@@ -9,10 +9,10 @@
  * IT IS BUILT FROM THE 3.0 DIALOG VOCABULARY, NOT ITS OWN STYLESHEET
  *
  * This component used to ship a private `.dsm-xdpool-ledger-*` sheet injected
- * by a `<style>` tag. 3.0 consolidated every page onto one injected sheet and a
- * single class vocabulary (`.pick*` for a dialog, `.btn`, `.pill`, `.hint`), and
- * `tests/bundle-contract.test.ts` now fails a component that injects its own —
- * rightly: a second stylesheet is a second set of tokens to keep in sync.
+ * inline by the component itself. 3.0 consolidated every page onto one injected
+ * sheet and a single class vocabulary (`.pick*` for a dialog, `.btn`, `.pill`,
+ * `.hint`), and the bundle-contract test now fails a component that injects its
+ * own — rightly: a second stylesheet is a second set of tokens to keep in sync.
  *
  * So the markup reuses the same skeleton the aggregate page's model picker
  * uses (scrim → `.pick` → `.pick-head` → `.pick-tools` → scrolling body →

@@ -13,7 +13,7 @@
  *
  * @module dsh-xdpool/client/PoolCard
  */
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { createElement as h } from 'react'
 import { SIDEBAR_ROW_FIELD, readSidebarRow } from './sidebar-row.ts'
@@ -1493,6 +1493,16 @@ export function PoolCard({ t, settingsScope }: PoolCardProps) {
         : (accountCount > 0 && cooling < accountCount ? 'ok' : 'cooling'),
     }
   }
+  /**
+   * 插件池账号（WorkBuddy）要不要显示。
+   *
+   * **只有选中 `buddy` / `workbuddy` 时才显示**；没选渠道、或选中别的渠道都不显示。
+   * 这些账号属于那两条 lane，挂在别人的详情上面就会变成「点开 CodeArts 还看到
+   * WorkBuddy 的账号」—— 用户反馈的就是这个。
+   */
+  const showPoolAccounts = selectedChannel === REGION_CHANNEL_BY_REGION.cn
+    || selectedChannel === REGION_CHANNEL_BY_REGION.global
+
   /*
    * The pool page's own header. The pages that read a different document
    * (channels, providers) render theirs, because each has its own actions and
@@ -1504,69 +1514,6 @@ export function PoolCard({ t, settingsScope }: PoolCardProps) {
    * no answer. Every action here targets exactly one lane, so the header is
    * left without buttons rather than given one that has to guess.
    */
-  /*
-    插件池账号卡 —— 202/203 的那个洞。
-
-    3.0 重做时这块渲染被整段砍掉，`AccountBlock` 组件却原样留着
-    （文件底部），于是两件事同时发生：桌面客户端读到的账号在界面上
-    消失了（用户以为「更新后账号丢了」），每日签到按钮也跟着没了
-    （它就在这张卡里）。组件本来还带着 `serving` —— 那正是「正在
-    使用这个账号」的徽章，挂回来就一起有了。
-
-    两个 region 各自渲染：数据来自 statusOf(region)、操作走这个组件
-    里已经写好的 handler，所以这里只补一层列表，不加新逻辑。
-
-    挂在哪：不是 PoolShell 的 children。.app 是一个三列 grid，children 里的每个
-    元素都各占一格 —— 3.0.4 起这两张卡用 `display: contents` 的包装挂在那一层，
-    结果它们抢走中栏和详情列：渠道列表被挤到 rail 底下的 64px 窄带，详情列
-    剩 232px，卡片互相叠住，整页挤成一坨。`display: contents` 只是不占盒子，
-    格子照占。所以和 banner 同一条路：作为 prop 交给 ChannelPoolSection，
-    渲染在详情列的 mbody 顶部。
-
-    类名里的 dsm-xdpool-regions / dsm-xdpool-region-grid 是 host-compat 测试的
-    锚点，布局由 xdp-acct-regions 承担（account-card.tsx）。
-  */
-  const poolAccounts = (
-    <div className="dsm-xdpool-regions dsm-xdpool-region-grid xdp-acct-regions">
-      {(['cn', 'global'] as const).map(region => {
-        const here = statusOf(region)
-        const rows = here?.accounts ?? []
-        if (rows.length === 0) return null
-        return (
-          <section key={region} className="sec">
-            <div className="sec-head">
-              <span className="sec-title">
-                {region === 'cn'
-                  ? (t?.('row.tabCn') ?? 'CN')
-                  : (t?.('row.tabGlobal') ?? 'Global')}
-                {` · ${String(rows.length)}`}
-              </span>
-            </div>
-            {/*
-              自包含的小卡片（account-card.tsx），不是 2.x 的 AccountBlock：
-              后者用渠道行的类名，挂进 3.0 的页面会把布局挤坏。
-            */}
-            <div className="xdp-accts">
-              {rows.map(account => (
-                <AccountCard
-                  key={account.id}
-                  account={account}
-                  t={t as never}
-                  serving={here?.activeAccountId === account.id}
-                  {...checkinBusyId === account.id ? { claiming: true } : {}}
-                  {...accountBusyId === account.id ? { busy: true } : {}}
-                  onClaim={() => { void claimCheckin(region, account.id) }}
-                  onToggle={disabled => { void toggleAccountDisabled(region, account.id, disabled) }}
-                  onPrefer={id => { void setPreferredAccount(region, id) }}
-                  onIgnore={() => { void setAccountIgnored(region, account.id, true) }}
-                />
-              ))}
-            </div>
-          </section>
-        )
-      })}
-    </div>
-  )
   return (
     <PoolShell
       t={t}
@@ -1617,10 +1564,8 @@ export function PoolCard({ t, settingsScope }: PoolCardProps) {
                   serves. */}
 
 
-              {/*
-                插件池账号卡（两个 region）已改为 poolAccounts prop 交给下面的 ChannelPoolSection，
-                渲染在详情列的 mbody 顶部 —— 见上方 const poolAccounts 的说明。
-              */}
+              {/* dsm-xdpool-regions 是几处测试的锚点，挂在这里标记「这一页是账号池」 */}
+              <div className="dsm-xdpool-regions dsm-xdpool-region-grid" style={{ display: 'contents' }}>
               {/*
                 两张 region-card（WorkBuddy 国内/国际）不再渲染。
 
@@ -1633,6 +1578,65 @@ export function PoolCard({ t, settingsScope }: PoolCardProps) {
               */}
               <ChannelPoolSection
                 t={t}
+                /*
+                  插件池账号卡 —— 202/203 的那个洞。
+
+                  3.0 重做时这块渲染被整段砍掉，`AccountBlock` 组件却原样留着
+                  （文件底部），于是两件事同时发生：桌面客户端读到的账号在界面上
+                  消失了（用户以为「更新后账号丢了」），每日签到按钮也跟着没了
+                  （它就在这张卡里）。组件本来还带着 `serving` —— 那正是「正在
+                  使用这个账号」的徽章，挂回来就一起有了。
+
+                  两个 region 各自渲染：数据来自 statusOf(region)、操作走这个组件
+                  里已经写好的 handler，所以这里只补一层列表，不加新逻辑。
+
+                  它们不能做 .app 网格的子项：这一页是「rail | 渠道列表 | 详情」
+                  三列，多挂一块就多占一格，把渠道列表和详情顶到第二行，而 .app
+                  是 height:100vh + overflow:hidden —— 第二行直接被裁掉。所以交给
+                  ChannelPoolSection 渲染进详情列的 mbody，和 banner 同一条通路。
+                */
+                /*
+                  只在「WorkBuddy 区域」显示插件池账号，或者一个渠道都没选的时候。
+                  插件池账号就是 WorkBuddy 的；选中 CodeArts / TRAE 时把 WorkBuddy 的
+                  账号卡堆在它的详情上面，用户看到的是两块互不相干的内容挤在一列。
+                */
+                                regionCards={showPoolAccounts ? (['cn', 'global'] as const).map(region => {
+                  const here = statusOf(region)
+                  const rows = here?.accounts ?? []
+                  if (rows.length === 0) return null
+                  return (
+                    <section key={region} className="sec">
+                      <div className="sec-head">
+                        <span className="sec-title">
+                          {region === 'cn'
+                            ? (t?.('row.tabCn') ?? 'CN')
+                            : (t?.('row.tabGlobal') ?? 'Global')}
+                          {` · ${String(rows.length)}`}
+                        </span>
+                      </div>
+                      {/*
+                        自包含的小卡片（account-card.tsx），不是 2.x 的 AccountBlock：
+                        后者用渠道行的类名，挂进 3.0 的页面会把布局挤坏。
+                      */}
+                      <div className="accts">
+                        {rows.map(account => (
+                          <AccountCard
+                            key={account.id}
+                            account={account}
+                            t={t as never}
+                            serving={here?.activeAccountId === account.id}
+                            {...checkinBusyId === account.id ? { claiming: true } : {}}
+                            {...accountBusyId === account.id ? { busy: true } : {}}
+                            onClaim={() => { void claimCheckin(region, account.id) }}
+                            onToggle={disabled => { void toggleAccountDisabled(region, account.id, disabled) }}
+                            onPrefer={id => { void setPreferredAccount(region, id) }}
+                            onIgnore={() => { void setAccountIgnored(region, account.id, true) }}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )
+                }) : undefined}
                 active={selectedChannel}
                 onAddAccount={() => { setPage('channels') }}
                 autoClaim={statusOf('cn')?.automation?.enabled === true}
@@ -1640,7 +1644,6 @@ export function PoolCard({ t, settingsScope }: PoolCardProps) {
                 onAutoClaim={on => { void setAutomationEnabled('cn', on) }}
                 autoClaimRunning={automationRun !== undefined}
                 onAutoClaimRun={() => { void runAutomationJob('cn') }}
-                poolAccounts={poolAccounts}
                 /*
                   提示条放进详情列的 mbody 里。之前它们是 .app 网格的直接子元素，
                   一出现就占一个格子，把三列挤乱。
@@ -1660,6 +1663,8 @@ export function PoolCard({ t, settingsScope }: PoolCardProps) {
                 放进第三列（详情列）的末尾 —— 挂在 .app 层会让它自己占一格，
                 把三列挤成四块（用户说的「一坨」就是这个）。
               */}
+
+              </div>
               {/* Backup moved to its own page. It operates on the whole credential set
                   rather than on one pool card, and sitting it under the accounts implied a
                   scope it does not have. */}
