@@ -38740,6 +38740,33 @@ var QODER_CN_FALLBACK_MODELS = [
   // ⚠️ `q37fmodel` / `mmodel` / `auto` **连 `thinking_config` 都没有** →
   // 完全不可选（界面显示「当前模型未提供推理等级」，与 IDE 的「不支持」一致）。
   { id: "auto", name: "Auto", contextWindow: 2e5, supportsImage: true, supportsThinking: true, priceFactor: 0.5 },
+  {
+    // [xdpool-local] 2026-11-24：客户端「模型与推理强度」设置页截图确认存在
+    // （思考=支持，默认强度=最大；档位 200K/400K/1M → contextWindow 取最大档 1M）。
+    // id 是推断值：该渠道命名规律为 qmodel/dmodel/kmodel 这类短前缀；模型目录由
+    // 服务端按账号加密下发、无公开端点（WASM 内只有推理路径），拿不到真实 id。
+    // 若调用报「模型不存在」：在 Qoder 客户端里发一条消息，抓推理请求体里的
+    // model_config.key，替换这里的 id。
+    id: "hungerg",
+    name: "HungerG",
+    contextWindow: 1e6,
+    supportsImage: true,
+    supportsThinking: true,
+    efforts: ["max", "high", "medium", "low"],
+    defaultEffort: "max",
+    supportsDisable: true
+  },
+  {
+    // 同上：Qwen4-Max（默认强度=高；id 沿用 qmodel_38max=Qwen3.8-Max 的命名规律）。
+    id: "qmodel_4max",
+    name: "Qwen4-Max",
+    contextWindow: 1e6,
+    supportsImage: true,
+    supportsThinking: true,
+    efforts: ["high", "medium", "low"],
+    defaultEffort: "high",
+    supportsDisable: true
+  },
   // 免费额度模型（isFree=true）：e2e 探针默认用它们，以免消耗积分。
   {
     id: "qmodel_38max",
