@@ -37165,6 +37165,15 @@ var LobsteraiAdapter = class extends LlmAdapter3 {
   /** 产品级兜底模型索引（`product.fallbackModels` 的 id → 条目）。 */
   fallbackIndex;
   /**
+   * [xdpool-local] 从 `qcloud/models` 拉到的真实目录；undefined = 还没成功拉过。
+   *
+   * 只缓存成功结果：拉取失败时保持 undefined，下一次 listModels 会再试，
+   * 期间一直用静态表 —— 失败被缓存住的话，网络恢复后要等进程重启才更新。
+   */
+  remoteModels;
+  /** `remoteModels` 的写入时刻，用于 TTL 判定。 */
+  remoteModelsAt = 0;
+  /**
    * 描述本适配器拥有的 provider 路由。
    *
    * 对入参做防御性归一化：DSH 会强制校验 `info.id === provider`，而模型设置页
@@ -38564,6 +38573,15 @@ function unwrapQoderEnvelopeStream(response, label) {
 }
 
 // vendor/channel-pack/src/qoder-product.ts
+/**
+ * [xdpool-local] Qoder 模型目录的缓存时长与超时。
+ *
+ * 10 分钟：榜单/倍率变动不频繁，而每次打开模型选择器都请求一次会让
+ * 首屏多一个来回。失败不缓存（见 fetchModels 的早退逻辑）。
+ */
+var QODER_CATALOG_TTL_MS = 10 * 60 * 1e3;
+var QODER_CATALOG_TIMEOUT_MS = 15e3;
+
 var QODER_FALLBACK_MODELS = [
   // ⚠️ 全部数值逐条对照本机 catalog-v6 实测（2026-09-21）。早期版本多处为
   // 手工估值，与真实值**大范围不符**（14 个模型有偏差，如 `smodel` 写 3.2
@@ -39569,12 +39587,113 @@ var QoderAdapter = class extends LlmAdapter4 {
    * 黑名单过滤掉它们 —— RPC 层只能凭裸 id 补回，展示名与倍率随之丢失
    * （用户报障：「关闭的就没有显示倍率」）。详见 `model.list` 端点的注释。
    */
+  /**
+   * [xdpool-local] 从 Qoder 的 qcloud 接口拉真实模型目录。
+   *
+   * WHY THIS EXISTS
+   *
+   * 本适配器原先恒用 `product.fallbackModels`（静态表）：上游改价、上新、下线，
+   * 插件都看不见，用户报「客户端有 HungerG / Qwen4-Max，插件里没有」。
+   *
+   * HOW IT WAS FOUND
+   *
+   * 客户端 `listChatModels` → `daemonService.listModels` →
+   * `qcloud` 分支 → `client.request("qcloud/models")` →
+   * `auth.requestOpenApi("api/v1/qcloud/models")`。即：
+   *
+   *     GET {openApiBase}/api/v1/qcloud/models     （普通 Bearer，无需 WASM 签名）
+   *
+   * 实测返回 `{ data: [{ modelId, displayName, priceFactor, isEnabled,
+   * promotion, description, isDefault, isNew }] }`，10 秒内可缓存。
+   *
+   * 任何一步失败都**回退静态表**并记一条 warn：目录拉不到不该让渠道整体不可用
+   * （静态表里的模型仍然能调）。
+   */
+  async fetchModels() {
+    const now = Date.now();
+    if (this.remoteModels !== undefined && now - this.remoteModelsAt < QODER_CATALOG_TTL_MS) {
+      return this.remoteModels;
+    }
+    let credential;
+    try {
+      credential = await this.options.resolveCredential(undefined);
+    } catch {
+      return undefined;
+    }
+    const token = credential?.security_oauth_token ?? credential?.access_token;
+    if (typeof token !== "string" || token.length === 0) return undefined;
+
+    const url = `${this.product.openApiBase}/api/v1/qcloud/models`;
+    let response;
+    try {
+      response = await this.fetchImpl(url, {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+          "Cosy-ClientType": this.product.sashClientType ?? "10",
+          "User-Agent": "Qoder"
+        },
+        signal: AbortSignal.timeout(QODER_CATALOG_TIMEOUT_MS)
+      });
+    } catch (error) {
+      this.options.logger?.warn?.("qodercn: model catalog fetch failed, using static table", error);
+      return undefined;
+    }
+    if (!response.ok) {
+      this.options.logger?.warn?.(`qodercn: model catalog HTTP ${String(response.status)}, using static table`);
+      return undefined;
+    }
+    let body;
+    try {
+      body = await response.json();
+    } catch {
+      return undefined;
+    }
+    const rows = Array.isArray(body?.data) ? body.data : [];
+    const models = [];
+    for (const row of rows) {
+      const id = typeof row?.modelId === "string" ? row.modelId : undefined;
+      if (id === undefined || id.length === 0) continue;
+      // 用户在该账号上关掉的模型：`isEnabled: false`。与静态表的 disabled 语义一致，
+      // 这里直接剔除，展示层仍会再按账号的黑名单过滤一次。
+      if (row.isEnabled === false) continue;
+      const priceFactor = typeof row.priceFactor === "number" ? row.priceFactor : undefined;
+      models.push({
+        id,
+        name: typeof row.displayName === "string" && row.displayName.length > 0 ? row.displayName : id,
+        // 服务端只给倍率，不给上下文窗口；窗口取静态表里同名条目的值，没有就不声明。
+        ...this.fallbackIndex.get(id)?.contextWindow === undefined
+          ? {}
+          : { contextWindow: this.fallbackIndex.get(id).contextWindow },
+        supportsImage: this.fallbackIndex.get(id)?.supportsImage ?? true,
+        supportsThinking: this.fallbackIndex.get(id)?.supportsThinking ?? true,
+        ...priceFactor === undefined ? {} : { priceFactor },
+        // 0 是合法倍率（免费），不能用 `> 0` 过滤。
+        ...priceFactor === 0 ? { isFree: true } : {},
+        ...row.isDefault === true ? { isDefault: true } : {}
+      });
+    }
+    if (models.length === 0) return undefined;
+    this.remoteModels = models;
+    this.remoteModelsAt = now;
+    this.options.logger?.info?.(`qodercn: model catalog loaded (${String(models.length)} models)`);
+    return models;
+  }
   listAllModels() {
-    return this.product.fallbackModels.map((model) => ({ id: model.id, name: qoderDisplayName(model) }));
+    const source = this.remoteModels ?? this.product.fallbackModels;
+    return source.map((model) => ({ id: model.id, name: qoderDisplayName(model) }));
   }
   async listModels(_provider) {
     if (!await providerCatalogVisible(this.options.accountPool, this.product.id)) return [];
-    const source = this.product.fallbackModels;
+    /*
+      [xdpool-local] 先拉真实目录，拿不到再回退静态表。
+
+      目录里出现静态表没有的新模型（例如客户端先上的 HungerG）时，展示名与倍率
+      由服务端给；静态表只提供上下文窗口这类服务端不下发的字段。
+    */
+    const remote = await this.fetchModels().catch(() => void 0);
+    const source = remote ?? this.product.fallbackModels;
     const disabled = laneAllowedIds(this.options.accountPool?.disabledModelsFor(this.product.id), this.product.id, () => source);
     const listed = disabled === void 0 || disabled.size === 0 ? source : source.filter((model) => !disabled.has(model.id));
     return listed.map((model) => ({
